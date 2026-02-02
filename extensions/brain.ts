@@ -226,7 +226,9 @@ export default function (pi: ExtensionAPI) {
   });
 
   // Helper to update brain widget
-  function updateBrainWidget(ctx: { ui: { setStatus: (id: string, text: string | undefined) => void } }) {
+  function updateBrainWidget(ctx: { ui?: { setStatus?: (id: string, text: string | undefined) => void } }) {
+    if (!ctx?.ui?.setStatus) return;
+    
     const memory = readJsonl<Entry>(MEMORY_FILE);
     const contexts = readJsonl<ContextEntry>(CONTEXT_FILE);
     const learnings = memory.filter((e) => e.type === "learning").length;
