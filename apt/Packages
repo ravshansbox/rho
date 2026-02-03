@@ -1,14 +1,14 @@
 Package: rho
-Version: 0.0.2
+Version: 0.0.3
 Architecture: all
 Maintainer: mikeyobrien
-Installed-Size: 98
+Installed-Size: 100
 Depends: nodejs, tmux, termux-api
-Filename: rho_0.0.2_all.deb
-Size: 25508
-MD5sum: 35eaea1d4e3ca00c19901bad22bedb6a
-SHA1: 60fd437b7aacb887dbfe3ec4e5a354a7d411af79
-SHA256: 6f6997d8b175f710da429ce619bea9de5c2a162c6945b4f2bf6c7db9c657d4ac
+Filename: rho_0.0.3_all.deb
+Size: 25888
+MD5sum: 373c5fb251fc3831422d0bdb2341867c
+SHA1: 3ae8b62800e39fd028c1262a39b77871a0c5e54c
+SHA256: 8dab071c1f0d430e7f6e430b84fd89d40318a4a1e5fe3c833eb72368a2b5e91b
 Homepage: https://github.com/mikeyobrien/rho
 Description: Rho - AI agent configuration for pi with periodic check-ins and Termux integration
 

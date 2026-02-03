@@ -1,12 +1,13 @@
 {
   "name": "rho",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "arch": "all",
   "maintainer": "mikeyobrien",
   "description": "Rho - AI agent configuration for pi with periodic check-ins and Termux integration",
   "homepage": "https://github.com/mikeyobrien/rho",
   "depends": ["nodejs", "tmux", "termux-api"],
   "files": {
+    "scripts/rho": "bin/rho",
     "scripts/rho-daemon": "bin/rho-daemon",
     "scripts/rho-status": "bin/rho-status",
     "scripts/rho-stop": "bin/rho-stop",

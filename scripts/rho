@@ -1,0 +1,66 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# rho - Start or attach to rho session
+#
+# Usage:
+#   rho          Start daemon (if needed) and attach
+#   rho -d       Start daemon in background, don't attach
+#   rho status   Show status
+#   rho stop     Stop daemon
+
+SESSION_NAME="rho"
+PIDFILE="$HOME/.rho-daemon.pid"
+
+case "${1:-}" in
+    status)
+        rho-status
+        exit $?
+        ;;
+    stop)
+        rho-stop
+        exit $?
+        ;;
+    -d|--daemon)
+        # Start in background only
+        if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
+            echo "Rho already running"
+            exit 0
+        fi
+        nohup rho-daemon >/dev/null 2>&1 &
+        sleep 1
+        echo "Rho daemon started (tmux session: $SESSION_NAME)"
+        exit 0
+        ;;
+esac
+
+# Default: start if needed, then attach
+if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
+    # Already running, just attach
+    exec tmux attach -t "$SESSION_NAME"
+else
+    # Start daemon in background, then attach
+    termux-wake-lock
+    tmux new-session -d -s "$SESSION_NAME" -c "$HOME" "pi -c"
+    
+    # Send notification
+    if command -v termux-notification >/dev/null; then
+        termux-notification \
+            --title "Rho" \
+            --content "Session started" \
+            --id rho-status \
+            --ongoing \
+            --icon smart_toy
+    fi
+    
+    # Background process to hold wake lock and monitor
+    (
+        while tmux has-session -t "$SESSION_NAME" 2>/dev/null; do
+            sleep 30
+        done
+        termux-wake-unlock 2>/dev/null
+        termux-notification-remove rho-status 2>/dev/null
+    ) &
+    echo $! > "$PIDFILE"
+    
+    # Attach
+    exec tmux attach -t "$SESSION_NAME"
+fi
