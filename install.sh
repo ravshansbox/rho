@@ -36,7 +36,12 @@ if [ ! -f "$HOME/AGENTS.md" ] || [ "$1" = "--force" ]; then
       -e "s|{{ARCH}}|$ARCH|g" \
       -e "s|{{SHELL}}|$USER_SHELL|g" \
       -e "s|{{HOME}}|$HOME|g" \
+      -e "s|{{CONFIG_PATH}}|$PI_DIR|g" \
+      -e "s|{{BRAIN_PATH}}|$BRAIN_DIR|g" \
+      -e "s|{{SKILLS_PATH}}|$PI_DIR/skills|g" \
       "$REPO_DIR/AGENTS.md.template" > "$HOME/AGENTS.md"
+
+  echo "  Note: {{NAME}} and {{DESCRIPTION}} left for agent to fill on first check-in"
 
   echo "✓ Created ~/AGENTS.md with environment info"
 else

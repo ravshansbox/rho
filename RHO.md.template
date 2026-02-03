@@ -2,6 +2,19 @@
 
 Periodic check-in reminders for the agent.
 
+## Bootstrap (One-time setup)
+
+- [ ] **FIRST CHECK-IN ONLY**: Copy `AGENTS.md.template` to `AGENTS.md` and fill in template variables:
+  - {{NAME}}: Choose an agent name (e.g., "Tau", "Claude", "Alpha")
+  - {{DESCRIPTION}}: Brief description of the agent's role
+  - {{OS}}, {{ARCH}}, {{SHELL}}: Detect from environment
+  - {{HOME}}, {{CONFIG_PATH}}, {{BRAIN_PATH}}: Set appropriate paths
+  - {{SKILLS_PATH}}: Where skills are stored
+
+## Time-Based Triggers
+
+- [ ] Add your recurring tasks here (e.g., check weather, run backups)
+
 ## Quick Scan
 
 - [ ] Any urgent messages or notifications I should see?
