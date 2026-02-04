@@ -569,7 +569,7 @@ export default function (pi: ExtensionAPI) {
       timeout: Type.Optional(Type.Number({ description: "Timeout in ms (default: 10000)" })),
     }),
 
-    async execute(_toolCallId, params, _onUpdate, _ctx) {
+    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
       const timeout = params.timeout || DEFAULT_TIMEOUT;
 
       try {

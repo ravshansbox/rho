@@ -71,7 +71,7 @@ export default function (pi: ExtensionAPI) {
       count: Type.Optional(Type.Number({ description: "Number of results (default: 5, max: 10)" })),
     }),
 
-    async execute(_toolCallId, params, _onUpdate, _ctx) {
+    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
       if (!API_KEY) {
         return {
           content: [{ type: "text", text: "Error: BRAVE_API_KEY not set. Add to ~/.bashrc:\nexport BRAVE_API_KEY=\"your-key\"" }],

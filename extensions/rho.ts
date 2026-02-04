@@ -24,10 +24,10 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
-// State stored in memory (reconstructed from session entries)
+// State stored in memory (reconstructed from session entries and persisted to disk)
 interface RhoState {
 	enabled: boolean;
 	intervalMs: number;
@@ -50,6 +50,9 @@ const DEFAULT_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 const MIN_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes minimum
 const MAX_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours maximum
 
+const STATE_DIR = join(process.env.HOME || "", ".pi", "agent");
+const STATE_PATH = join(STATE_DIR, "rho-state.json");
+
 const RHO_PROMPT = `This is a rho check-in. Review the following:
 
 1. Read RHO.md from the workspace if it exists - follow any checklists there
@@ -71,6 +74,51 @@ export default function (pi: ExtensionAPI) {
 	};
 
 	let timer: NodeJS.Timeout | null = null;
+
+	const normalizeInterval = (value: unknown): number => {
+		if (typeof value !== "number" || Number.isNaN(value)) return DEFAULT_INTERVAL_MS;
+		if (value === 0) return 0;
+		if (value < MIN_INTERVAL_MS || value > MAX_INTERVAL_MS) return DEFAULT_INTERVAL_MS;
+		return Math.floor(value);
+	};
+
+	const loadStateFromDisk = () => {
+		try {
+			const raw = readFileSync(STATE_PATH, "utf-8");
+			const parsed = JSON.parse(raw) as Partial<RhoState>;
+			if (typeof parsed.enabled === "boolean") state.enabled = parsed.enabled;
+			if (parsed.intervalMs !== undefined) state.intervalMs = normalizeInterval(parsed.intervalMs);
+			if (typeof parsed.lastCheckAt === "number") state.lastCheckAt = parsed.lastCheckAt;
+			if (typeof parsed.nextCheckAt === "number") state.nextCheckAt = parsed.nextCheckAt;
+			if (typeof parsed.checkCount === "number" && parsed.checkCount >= 0) state.checkCount = parsed.checkCount;
+		} catch {
+			// Ignore missing or invalid state
+		}
+
+		if (state.intervalMs === 0) state.enabled = false;
+	};
+
+	const saveStateToDisk = () => {
+		try {
+			mkdirSync(STATE_DIR, { recursive: true });
+			writeFileSync(
+				STATE_PATH,
+				JSON.stringify(
+					{
+						enabled: state.enabled,
+						intervalMs: state.intervalMs,
+						lastCheckAt: state.lastCheckAt,
+						nextCheckAt: state.nextCheckAt,
+						checkCount: state.checkCount,
+					},
+					null,
+					2
+				)
+			);
+		} catch {
+			// Ignore persistence failures
+		}
+	};
 
 	/**
 	 * Reconstruct state from session entries
@@ -131,15 +179,24 @@ export default function (pi: ExtensionAPI) {
 
 		if (!state.enabled || state.intervalMs === 0) {
 			state.nextCheckAt = null;
+			saveStateToDisk();
 			return;
 		}
 
-		const nextAt = Date.now() + state.intervalMs;
+		const now = Date.now();
+		const base = state.lastCheckAt && state.lastCheckAt <= now ? state.lastCheckAt : now;
+		let nextAt = base + state.intervalMs;
+		if (nextAt <= now) {
+			nextAt = now + 1000;
+		}
 		state.nextCheckAt = nextAt;
 
+		const delay = Math.max(0, nextAt - now);
 		timer = setTimeout(() => {
 			triggerCheck(ctx);
-		}, state.intervalMs);
+		}, delay);
+
+		saveStateToDisk();
 	};
 
 	/**
@@ -218,18 +275,21 @@ export default function (pi: ExtensionAPI) {
 
 	// Reconstruct state on session events
 	pi.on("session_start", async (_event, ctx) => {
+		loadStateFromDisk();
 		reconstructState(ctx);
 		scheduleNext(ctx);
 		updateStatus(ctx);
 	});
 
 	pi.on("session_switch", async (_event, ctx) => {
+		loadStateFromDisk();
 		reconstructState(ctx);
 		scheduleNext(ctx);
 		updateStatus(ctx);
 	});
 
 	pi.on("session_fork", async (_event, ctx) => {
+		loadStateFromDisk();
 		reconstructState(ctx);
 		scheduleNext(ctx);
 		updateStatus(ctx);
