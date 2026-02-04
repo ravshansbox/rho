@@ -27,8 +27,8 @@ const CONTEXT_FILE = path.join(BRAIN_DIR, "context.jsonl");
 const ARCHIVE_FILE = path.join(BRAIN_DIR, "archive.jsonl");
 const DAILY_MEMORY_DIR = path.join(BRAIN_DIR, "memory");
 
-// Auto-memory config
-const AUTO_MEMORY_ENABLED = process.env.RHO_AUTO_MEMORY !== "0";
+// Auto-memory config — disabled for subagent/heartbeat sessions
+const AUTO_MEMORY_ENABLED = process.env.RHO_AUTO_MEMORY !== "0" && process.env.RHO_SUBAGENT !== "1";
 const AUTO_MEMORY_DEBUG = process.env.RHO_AUTO_MEMORY_DEBUG === "1" || process.env.RHO_AUTO_MEMORY_DEBUG === "true";
 const AUTO_MEMORY_MAX_ITEMS = 3;
 const AUTO_MEMORY_MAX_TEXT = 200;
