@@ -58,6 +58,28 @@ This will:
 ### rho.ts
 Continuous presence system. Periodic check-ins to surface urgent tasks, follow-ups, and session health issues without interrupting flow.
 
+**Agent loop (pi extension wiring):**
+```mermaid
+flowchart TD
+    A[Pi loads extension] --> B[rho.ts default(pi)]
+    B --> C[register tools + /rho command]
+    B --> D[listen: session_start/switch/fork]
+    D --> E[load state + schedule timer]
+    E --> F[timer fires -> triggerCheck]
+    F --> G{tmux available?}
+    G -->|yes| H[spawn heartbeat in tmux]
+    G -->|no| I[send follow-up message]
+    H --> J[agent run]
+    I --> J
+    J --> K[agent_end]
+    K --> L[read heartbeats.jsonl]
+    L --> M{alert?}
+    M -->|yes| N[notify user]
+    M -->|no| O[no alert]
+    N --> E
+    O --> E
+```
+
 **Commands:**
 - `/rho status` — Show check-in state
 - `/rho enable/disable` — Toggle check-ins  
