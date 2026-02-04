@@ -166,4 +166,10 @@ Rho uses a JSONL-based memory system at `~/.pi/brain/`:
 - `memory.jsonl` — Learnings and preferences (grows over time)
 - `context.jsonl` — Project-specific context (matched by cwd)
 
+**Auto-memory (LLM-based):** after each agent turn, Rho can extract durable learnings/preferences using the current model and append them to `memory.jsonl` (deduped, max 3 items/turn).
+
+Controls:
+- `RHO_AUTO_MEMORY=0` — disable auto-memory
+- `RHO_AUTO_MEMORY_DEBUG=1` — show debug toasts
+
 Use the `memory` tool or `/brain` command to interact with it.
