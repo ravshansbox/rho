@@ -24,6 +24,7 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
+import { execSync } from "node:child_process";
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -46,12 +47,29 @@ interface RhoDetails {
 	wasTriggered?: boolean;
 }
 
+type HeartbeatStatus = "ok" | "alert";
+
+interface HeartbeatEntry {
+	timestamp: string;
+	status: HeartbeatStatus;
+	summary: string;
+	duration_ms: number;
+	output_path?: string | null;
+}
+
 const DEFAULT_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 const MIN_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes minimum
 const MAX_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours maximum
 
 const STATE_DIR = join(process.env.HOME || "", ".pi", "agent");
 const STATE_PATH = join(STATE_DIR, "rho-state.json");
+const RESULTS_DIR = join(process.env.HOME || "", ".rho", "results");
+const HEARTBEAT_HISTORY_PATH = join(process.env.HOME || "", ".rho", "heartbeats.jsonl");
+const HEARTBEAT_PROMPT_FILE = join(process.env.HOME || "", ".rho", "heartbeat-prompt.txt");
+const DEFAULT_SESSION_NAME = "rho";
+const HEARTBEAT_WINDOW_NAME = "heartbeat";
+const MAX_WINDOW_NAME = 50;
+const HEARTBEAT_NOTIFICATION_ID = "rho-heartbeat-alert";
 
 const RHO_PROMPT = `This is a rho check-in. Review the following:
 
@@ -64,6 +82,10 @@ If nothing needs attention, reply with exactly: RHO_OK
 If something needs attention, reply with the alert (do NOT include RHO_OK).`;
 
 export default function (pi: ExtensionAPI) {
+	if (process.env.RHO_SUBAGENT === "1") {
+		return;
+	}
+
 	// In-memory state (reconstructed from session)
 	let state: RhoState = {
 		enabled: true,
@@ -73,6 +95,7 @@ export default function (pi: ExtensionAPI) {
 		checkCount: 0,
 	};
 
+	let lastHeartbeatNotifiedAt: string | null = null;
 	let timer: NodeJS.Timeout | null = null;
 
 	const normalizeInterval = (value: unknown): number => {
@@ -168,6 +191,174 @@ export default function (pi: ExtensionAPI) {
 		return `${minutes}m`;
 	};
 
+	const shellEscape = (value: string): string => `'${value.replace(/'/g, "'\"'\"'")}'`;
+
+	const sanitizeWindowName = (value: string): string => {
+		const cleaned = value.replace(/[^A-Za-z0-9_.-]/g, "_").slice(0, MAX_WINDOW_NAME);
+		return cleaned || "subagent";
+	};
+
+	const ensureResultsDir = () => {
+		try {
+			mkdirSync(RESULTS_DIR, { recursive: true });
+		} catch {
+			// Ignore errors
+		}
+	};
+
+	const getTmuxSessionName = (): string => {
+		if (!process.env.TMUX) return DEFAULT_SESSION_NAME;
+		try {
+			const name = execSync("tmux display-message -p '#S'", { encoding: "utf-8" }).trim();
+			return name || DEFAULT_SESSION_NAME;
+		} catch {
+			return DEFAULT_SESSION_NAME;
+		}
+	};
+
+	const parseHeartbeatEntry = (raw: string): HeartbeatEntry | null => {
+		try {
+			const parsed = JSON.parse(raw) as Partial<HeartbeatEntry>;
+			if (!parsed || typeof parsed.timestamp !== "string") return null;
+			if (parsed.status !== "ok" && parsed.status !== "alert") return null;
+			if (typeof parsed.summary !== "string") return null;
+			if (typeof parsed.duration_ms !== "number") return null;
+			return {
+				timestamp: parsed.timestamp,
+				status: parsed.status,
+				summary: parsed.summary,
+				duration_ms: parsed.duration_ms,
+				output_path: typeof parsed.output_path === "string" ? parsed.output_path : parsed.output_path ?? null,
+			};
+		} catch {
+			return null;
+		}
+	};
+
+	const readLastHeartbeatEntry = (): HeartbeatEntry | null => {
+		try {
+			const raw = readFileSync(HEARTBEAT_HISTORY_PATH, "utf-8").trim();
+			if (!raw) return null;
+			const lines = raw
+				.split("\n")
+				.map((line) => line.trim())
+				.filter(Boolean);
+			if (!lines.length) return null;
+			return parseHeartbeatEntry(lines[lines.length - 1]);
+		} catch {
+			return null;
+		}
+	};
+
+	const formatHeartbeatSummary = (summary: string): string => {
+		const cleaned = summary
+			.split("\n")
+			.map((line) => line.trim())
+			.filter(Boolean)
+			.join(" ");
+		if (!cleaned) return "";
+		const maxLength = 200;
+		return cleaned.length > maxLength ? `${cleaned.slice(0, maxLength - 1)}…` : cleaned;
+	};
+
+	const sendHeartbeatAlert = (ctx: ExtensionContext, entry: HeartbeatEntry) => {
+		const sessionName = getTmuxSessionName();
+		const summary = formatHeartbeatSummary(entry.summary);
+		const hint = `Open: tmux attach -t ${sessionName} (window ${HEARTBEAT_WINDOW_NAME})`;
+		const content = summary ? `${summary}\n${hint}` : hint;
+		const action = `tmux attach -t ${sessionName}`;
+		let notified = false;
+
+		try {
+			execSync("command -v termux-notification", { stdio: "ignore" });
+			const command = [
+				"termux-notification",
+				"--title",
+				shellEscape("ρ heartbeat alert"),
+				"--content",
+				shellEscape(content),
+				"--id",
+				shellEscape(HEARTBEAT_NOTIFICATION_ID),
+				"--button1",
+				shellEscape("Open heartbeat"),
+				"--button1-action",
+				shellEscape(action),
+			].join(" ");
+			execSync(command, { stdio: "ignore" });
+			notified = true;
+		} catch {
+			// Ignore failures; fallback below.
+		}
+
+		if (!notified) {
+			const fallback = summary ? `ρ alert: ${summary}` : "ρ heartbeat alert";
+			ctx.ui.notify(`${fallback} (${hint})`, "warning");
+		}
+	};
+
+	const seedLastHeartbeatNotification = () => {
+		const lastEntry = readLastHeartbeatEntry();
+		if (lastEntry?.timestamp) {
+			lastHeartbeatNotifiedAt = lastEntry.timestamp;
+		}
+	};
+
+	const heartbeatWindowExists = (sessionName: string): boolean => {
+		try {
+			const output = execSync(`tmux list-windows -t ${shellEscape(sessionName)} -F "#{window_name}"`, {
+				encoding: "utf-8",
+			});
+			return output
+				.split("\n")
+				.map((name) => name.trim())
+				.filter(Boolean)
+				.includes(HEARTBEAT_WINDOW_NAME);
+		} catch {
+			return false;
+		}
+	};
+
+	const runHeartbeatInTmux = (prompt: string): boolean => {
+		try {
+			execSync("command -v tmux", { stdio: "ignore" });
+		} catch {
+			return false;
+		}
+
+		const sessionName = getTmuxSessionName();
+		try {
+			execSync(`tmux has-session -t ${shellEscape(sessionName)}`, { stdio: "ignore" });
+		} catch {
+			return false;
+		}
+
+		try {
+			ensureResultsDir();
+			writeFileSync(HEARTBEAT_PROMPT_FILE, prompt, "utf-8");
+		} catch {
+			return false;
+		}
+
+		const target = `${sessionName}:${HEARTBEAT_WINDOW_NAME}`;
+		const promptArg = `@${HEARTBEAT_PROMPT_FILE}`;
+		const command = `clear; RHO_SUBAGENT=1 pi -p --no-session ${shellEscape(promptArg)}; rm -f ${shellEscape(HEARTBEAT_PROMPT_FILE)}`;
+
+		try {
+			if (!heartbeatWindowExists(sessionName)) {
+				execSync(
+					`tmux new-window -d -t ${shellEscape(sessionName)} -n ${shellEscape(HEARTBEAT_WINDOW_NAME)}`,
+					{ stdio: "ignore" }
+				);
+			}
+
+			execSync(`tmux send-keys -t ${shellEscape(target)} C-c`, { stdio: "ignore" });
+			execSync(`tmux send-keys -t ${shellEscape(target)} ${shellEscape(command)} C-m`, { stdio: "ignore" });
+			return true;
+		} catch {
+			return false;
+		}
+	};
+
 	/**
 	 * Schedule the next check-in
 	 */
@@ -245,8 +436,11 @@ export default function (pi: ExtensionAPI) {
 			fullPrompt += `\n\n---\n\nRHO.md content:\n${rhoMd}`;
 		}
 
-		// Send as user message (appears as system event style)
-		pi.sendUserMessage(fullPrompt, { deliverAs: "followUp" });
+		const sentToTmux = runHeartbeatInTmux(fullPrompt);
+		if (!sentToTmux) {
+			// Send as user message (appears as system event style)
+			pi.sendUserMessage(fullPrompt, { deliverAs: "followUp" });
+		}
 
 		// Schedule next
 		scheduleNext(ctx);
@@ -277,6 +471,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
 		loadStateFromDisk();
 		reconstructState(ctx);
+		seedLastHeartbeatNotification();
 		scheduleNext(ctx);
 		updateStatus(ctx);
 	});
@@ -284,6 +479,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_switch", async (_event, ctx) => {
 		loadStateFromDisk();
 		reconstructState(ctx);
+		seedLastHeartbeatNotification();
 		scheduleNext(ctx);
 		updateStatus(ctx);
 	});
@@ -291,6 +487,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_fork", async (_event, ctx) => {
 		loadStateFromDisk();
 		reconstructState(ctx);
+		seedLastHeartbeatNotification();
 		scheduleNext(ctx);
 		updateStatus(ctx);
 	});
@@ -303,26 +500,14 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
-	// Listen for RHO_OK responses to suppress them
-	pi.on("agent_end", async (event, ctx) => {
-		const lastMessage = event.messages[event.messages.length - 1];
-		if (lastMessage?.role === "assistant" && lastMessage.content) {
-			const text = lastMessage.content
-				.filter((c) => c.type === "text")
-				.map((c) => c.text)
-				.join("");
-
-			// Check for RHO_OK at start or end
-			const trimmed = text.trim();
-			const isRhoOk =
-				trimmed === "RHO_OK" ||
-				trimmed.startsWith("RHO_OK\n") ||
-				trimmed.endsWith("\nRHO_OK");
-
-			if (isRhoOk && trimmed.length <= 300) {
-				// Suppress this message
-				ctx.ui.notify("ρ: OK (no alerts)", "info");
+	// Notify on heartbeat alerts only
+	pi.on("agent_end", async (_event, ctx) => {
+		const lastEntry = readLastHeartbeatEntry();
+		if (lastEntry?.timestamp && lastEntry.timestamp !== lastHeartbeatNotifiedAt) {
+			if (lastEntry.status === "alert") {
+				sendHeartbeatAlert(ctx, lastEntry);
 			}
+			lastHeartbeatNotifiedAt = lastEntry.timestamp;
 		}
 
 		// Update status after each turn
@@ -479,6 +664,91 @@ export default function (pi: ExtensionAPI) {
 
 			const status = details.enabled ? theme.fg("success", "on") : theme.fg("dim", "off");
 			return new Text(theme.fg("success", "✓ ") + theme.fg("muted", `${details.action} `) + status, 0, 0);
+		},
+	});
+
+	// Register rho_subagent tool
+	pi.registerTool({
+		name: "rho_subagent",
+		label: "Subagent",
+		description:
+			"Run a pi subagent in a new tmux window (session 'rho' by default). Default mode is interactive; print mode writes results to ~/.rho/results.",
+		parameters: Type.Object({
+			prompt: Type.String({ description: "Prompt to run in the subagent" }),
+			session: Type.Optional(Type.String({ description: "tmux session name (default: rho)" })),
+			window: Type.Optional(Type.String({ description: "tmux window name (auto-generated if omitted)" })),
+			mode: Type.Optional(StringEnum(["interactive", "print"] as const)),
+			outputFile: Type.Optional(Type.String({ description: "Output file path (print mode only; default: ~/.rho/results/<timestamp>.json)" })),
+		}),
+
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const prompt = params.prompt?.trim();
+			if (!prompt) {
+				return { content: [{ type: "text", text: "Error: prompt required" }], details: { error: true } };
+			}
+
+			try {
+				execSync("command -v tmux", { stdio: "ignore" });
+			} catch {
+				return { content: [{ type: "text", text: "Error: tmux not installed" }], details: { error: true } };
+			}
+
+			const sessionName = (params.session || DEFAULT_SESSION_NAME).trim() || DEFAULT_SESSION_NAME;
+		const mode = (params.mode || "interactive").trim().toLowerCase();
+		if (mode !== "interactive" && mode !== "print") {
+			return { content: [{ type: "text", text: "Error: mode must be 'interactive' or 'print'" }], details: { error: true } };
+		}
+
+			try {
+				execSync(`tmux has-session -t ${shellEscape(sessionName)}`, { stdio: "ignore" });
+			} catch {
+				return {
+					content: [{ type: "text", text: `Error: tmux session '${sessionName}' not found` }],
+					details: { error: true },
+				};
+			}
+
+			ensureResultsDir();
+
+			const windowSeed = new Date().toISOString().slice(11, 16).replace(":", "");
+			const windowName = sanitizeWindowName(params.window?.trim() || `subagent-${windowSeed}`);
+
+			const outputFileRaw = params.outputFile?.trim();
+			const outputFile = outputFileRaw
+				? outputFileRaw.startsWith("/")
+					? outputFileRaw
+					: join(ctx.cwd, outputFileRaw)
+				: join(RESULTS_DIR, `${Date.now()}.json`);
+
+			const shellPath = process.env.SHELL || "bash";
+			const script =
+				mode === "print"
+					? `RHO_SUBAGENT=1 pi -p --no-session ${shellEscape(prompt)} 2>&1 | tee ${shellEscape(outputFile)}; exec ${shellEscape(shellPath)}`
+					: `RHO_SUBAGENT=1 pi --no-session ${shellEscape(prompt)}; exec ${shellEscape(shellPath)}`;
+			const innerCommand = `bash -lc ${shellEscape(script)}`;
+			const tmuxCommand = `tmux new-window -d -P -F "#{session_name}:#{window_index}" -t ${shellEscape(sessionName)} -n ${shellEscape(windowName)} ${shellEscape(innerCommand)}`;
+
+			let windowId = "";
+			try {
+				windowId = execSync(tmuxCommand, { encoding: "utf-8" }).trim();
+				if (windowId) {
+					execSync(`tmux set-option -t ${shellEscape(windowId)} remain-on-exit on`, { stdio: "ignore" });
+				}
+			} catch {
+				return {
+					content: [{ type: "text", text: "Error: failed to create tmux window" }],
+					details: { error: true },
+				};
+			}
+
+			const message =
+				mode === "print"
+					? `Started subagent in ${windowId} (output: ${outputFile})`
+					: `Started subagent in ${windowId} (interactive mode)`;
+			return {
+				content: [{ type: "text", text: message }],
+				details: { session: sessionName, window: windowId, outputFile: mode === "print" ? outputFile : undefined, mode },
+			};
 		},
 	});
 
