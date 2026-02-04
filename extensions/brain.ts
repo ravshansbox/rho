@@ -463,18 +463,20 @@ export default function (pi: ExtensionAPI) {
   let autoMemoryInFlight = false;
   let compactMemoryInFlight = false;
 
-  // Update widget on session start
+  // Cache brain context at session start (stable for the session) and update widget
+  let cachedBrainPrompt: string | null = null;
+
   pi.on("session_start", async (_event, ctx) => {
+    const brainContext = buildBrainContext(ctx.cwd);
+    cachedBrainPrompt = brainContext.trim()
+      ? "\n\n# Memory\n\n" + MEMORY_INSTRUCTIONS + "\n\n" + brainContext
+      : null;
     updateBrainWidget(ctx);
   });
 
-  // Inject brain context into system prompt
-  pi.on("before_agent_start", async (event, ctx) => {
-    const brainContext = buildBrainContext(ctx.cwd);
-    if (brainContext.trim()) {
-      return {
-        systemPrompt: event.systemPrompt + "\n\n# Memory\n\n" + MEMORY_INSTRUCTIONS + "\n\n" + brainContext,
-      };
+  pi.on("before_agent_start", async (event, _ctx) => {
+    if (cachedBrainPrompt) {
+      return { systemPrompt: event.systemPrompt + cachedBrainPrompt };
     }
   });
 
