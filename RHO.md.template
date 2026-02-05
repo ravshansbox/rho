@@ -4,7 +4,7 @@ Periodic check-in reminders for the agent.
 
 ## Bootstrap (One-time setup)
 
-- [ ] **FIRST CHECK-IN ONLY**: Copy `AGENTS.md.template` to `AGENTS.md` and fill in template variables:
+- [ ] **FIRST CHECK-IN ONLY**: Open `AGENTS.md` (created by `install.sh` from `AGENTS.md.template`) and fill in template variables:
   - {{NAME}}: Choose an agent name (e.g., "Tau", "Claude", "Alpha")
   - {{DESCRIPTION}}: Brief description of the agent's role
   - {{OS}}, {{ARCH}}, {{SHELL}}: Detect from environment
@@ -40,4 +40,4 @@ Periodic check-in reminders for the agent.
 ---
 
 **Note:** This file is read on every heartbeat. Keep it concise.
-If this file is empty (only headers), heartbeats will be skipped to save API calls.
+If both this file and `HEARTBEAT.md` are empty (only headers), heartbeats will be skipped to save API calls.

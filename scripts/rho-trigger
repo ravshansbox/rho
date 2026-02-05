@@ -5,7 +5,7 @@ SESSION_NAME="rho"
 
 if ! tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
     echo "Rho not running. Starting..."
-    ~/.local/bin/rho-daemon &
+    rho-daemon &
     exit 1
 fi
 

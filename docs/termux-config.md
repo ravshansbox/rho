@@ -42,6 +42,8 @@ The 🎤 key sends `Ctrl+b m`, which is a tmux binding that triggers voice input
 
 #### Scripts
 
+`install.sh` symlinks the STT scripts into `~/bin` (`stt-send` and `stt`) during setup, so the paths below are correct on a standard install. Only change them if you move the scripts.
+
 **`~/.tmux.conf`**:
 ```bash
 # STT: prefix + m (microphone) → speak → text typed + enter

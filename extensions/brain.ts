@@ -60,7 +60,8 @@ async function resolveSmallModel(
     .filter((m) => m.provider === currentModel.provider)
     .sort((a, b) => a.cost.output - b.cost.output);
 
-  // Pick the cheapest one that has auth (same provider = same key usually)
+  // Return candidates in order of preference (cheapest first, current model last).
+  // Caller should try each and fall back on auth errors (e.g. OAuth not supported on older models).
   for (const candidate of sameProvider) {
     const apiKey = await ctx.modelRegistry.getApiKey(candidate);
     if (apiKey) {
@@ -138,10 +139,20 @@ function ensureDir(): void {
 function readJsonl<T>(file: string): T[] {
   if (!fs.existsSync(file)) return [];
   const content = fs.readFileSync(file, "utf-8");
-  return content
-    .split("\n")
-    .filter((line) => line.trim())
-    .map((line) => JSON.parse(line) as T);
+  const entries: T[] = [];
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      entries.push(JSON.parse(trimmed) as T);
+    } catch (error) {
+      if (AUTO_MEMORY_DEBUG) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`Brain readJsonl skipped malformed line in ${file}: ${message}`);
+      }
+    }
+  }
+  return entries;
 }
 
 function appendJsonl<T>(file: string, entry: T): void {
@@ -333,7 +344,7 @@ async function runAutoMemoryExtraction(
 
   const resolved = await resolveSmallModel(ctx);
   if (!resolved) return null;
-  const { model, apiKey } = resolved;
+  const { model } = resolved;
 
   const conversationText = serializeConversation(convertToLlm(messages));
   if (!conversationText.trim()) return null;
@@ -347,19 +358,39 @@ async function runAutoMemoryExtraction(
   const existingText = existing.length > 0 ? formatExistingMemories(existing) : undefined;
 
   const prompt = buildAutoMemoryPrompt(conversationText, existingText);
-  const response = await complete(
-    model,
-    {
-      messages: [
+
+  // Try resolved model first, fall back to current session model if needed.
+  let response;
+  const candidates = [resolved];
+  if (resolved.model.id !== ctx.model?.id && ctx.model) {
+    const fallbackKey = await ctx.modelRegistry.getApiKey(ctx.model);
+    if (fallbackKey) candidates.push({ model: ctx.model, apiKey: fallbackKey });
+  }
+
+  for (const { model, apiKey } of candidates) {
+    try {
+      response = await complete(
+        model,
         {
-          role: "user" as const,
-          content: [{ type: "text" as const, text: prompt }],
-          timestamp: Date.now(),
+          messages: [
+            {
+              role: "user" as const,
+              content: [{ type: "text" as const, text: prompt }],
+              timestamp: Date.now(),
+            },
+          ],
         },
-      ],
-    },
-    { apiKey, maxTokens: 512, signal: options?.signal }
-  );
+        { apiKey, maxTokens: 512, signal: options?.signal }
+      );
+      break;
+    } catch (e) {
+      if (AUTO_MEMORY_DEBUG) {
+        console.error(`Auto-memory failed with ${model.id}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+  }
+
+  if (!response) return null;
 
   const responseText = response.content
     .filter((c): c is { type: "text"; text: string } => c.type === "text")
@@ -473,30 +504,49 @@ async function runConsolidation(
 ): Promise<{ before: number; after: number; removed: number } | null> {
   const resolved = await resolveSmallModel(ctx);
   if (!resolved) return null;
-  const { model, apiKey } = resolved;
 
   const entries = readJsonl<Entry>(MEMORY_FILE);
   if (entries.length < 5) return null; // Not enough to bother
 
-  if (AUTO_MEMORY_DEBUG) {
-    console.error(`Consolidation using: ${model.name} (${model.provider})`);
-  }
-
   const prompt = buildConsolidationPrompt(entries);
 
-  const response = await complete(
-    model,
-    {
-      messages: [
+  // Try the resolved model first; if it fails (e.g. OAuth not supported on older models),
+  // fall back to the current session model which is known to work.
+  let response;
+  const candidates = [resolved];
+  if (resolved.model.id !== ctx.model?.id && ctx.model) {
+    const fallbackKey = await ctx.modelRegistry.getApiKey(ctx.model);
+    if (fallbackKey) candidates.push({ model: ctx.model, apiKey: fallbackKey });
+  }
+
+  for (const { model, apiKey } of candidates) {
+    try {
+      if (AUTO_MEMORY_DEBUG) {
+        console.error(`Consolidation trying: ${model.name} (${model.provider})`);
+      }
+      response = await complete(
+        model,
         {
-          role: "user" as const,
-          content: [{ type: "text" as const, text: prompt }],
-          timestamp: Date.now(),
+          messages: [
+            {
+              role: "user" as const,
+              content: [{ type: "text" as const, text: prompt }],
+              timestamp: Date.now(),
+            },
+          ],
         },
-      ],
-    },
-    { apiKey, maxTokens: 4096, signal: options?.signal }
-  );
+        { apiKey, maxTokens: 16384, signal: options?.signal }
+      );
+      break; // success
+    } catch (e) {
+      if (AUTO_MEMORY_DEBUG) {
+        console.error(`Consolidation failed with ${model.id}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      continue; // try next candidate
+    }
+  }
+
+  if (!response) return null;
 
   const responseText = response.content
     .filter((c): c is { type: "text"; text: string } => c.type === "text")
@@ -504,8 +554,18 @@ async function runConsolidation(
     .join("\n")
     .trim();
 
+  if (AUTO_MEMORY_DEBUG) {
+    console.error(`Consolidation response length: ${responseText.length} chars`);
+    console.error(`Consolidation response preview: ${responseText.slice(0, 200)}`);
+  }
+
   const parsed = parseConsolidationResponse(responseText);
-  if (!parsed) return null;
+  if (!parsed) {
+    if (AUTO_MEMORY_DEBUG) {
+      console.error(`Consolidation parse failed. Raw response:\n${responseText.slice(0, 500)}`);
+    }
+    return null;
+  }
 
   // Build a lookup of existing entries by ID for metadata preservation
   const entryMap = new Map<string, Entry>();
@@ -767,14 +827,18 @@ export default function (pi: ExtensionAPI) {
   });
 
   // Helper to update brain widget
-  function updateBrainWidget(ctx: { ui?: { setStatus?: (id: string, text: string | undefined) => void } }) {
+  function updateBrainWidget(ctx: {
+    cwd?: string;
+    ui?: { setStatus?: (id: string, text: string | undefined) => void };
+  }) {
     if (!ctx?.ui?.setStatus) return;
-    
+
     const memory = readJsonl<Entry>(MEMORY_FILE);
     const contexts = readJsonl<ContextEntry>(CONTEXT_FILE);
     const learnings = memory.filter((e) => e.type === "learning").length;
     const prefs = memory.filter((e) => e.type === "preference").length;
-    const matched = contexts.find((c) => process.cwd().startsWith(c.path));
+    const cwd = ctx.cwd ?? process.cwd();
+    const matched = contexts.find((c) => cwd.startsWith(c.path));
 
     let status = `🧠 ${learnings}L ${prefs}P`;
     if (matched) {

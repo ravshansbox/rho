@@ -12,10 +12,15 @@
     "scripts/rho-status": "bin/rho-status",
     "scripts/rho-stop": "bin/rho-stop",
     "scripts/rho-trigger": "bin/rho-trigger",
+    "scripts/bin": "share/rho/scripts/bin",
     "extensions": "share/rho/extensions",
     "skills": "share/rho/skills",
     "brain": "share/rho/brain",
+    "docs": "share/rho/docs",
+    "tasker/Rho.prj.xml": "share/rho/tasker/Rho.prj.xml",
     "AGENTS.md.template": "share/rho/AGENTS.md.template",
-    "RHO.md.template": "share/rho/RHO.md.template"
+    "RHO.md.template": "share/rho/RHO.md.template",
+    "HEARTBEAT.md.template": "share/rho/HEARTBEAT.md.template",
+    "SOUL.md.template": "share/rho/SOUL.md.template"
   }
 }

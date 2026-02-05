@@ -46,7 +46,7 @@ else
         termux-notification \
             --title "Rho" \
             --content "Session started" \
-            --id rho-status \
+            --id rho-daemon \
             --ongoing \
             --icon smart_toy
     fi
@@ -57,7 +57,7 @@ else
             sleep 30
         done
         termux-wake-unlock 2>/dev/null
-        termux-notification-remove rho-status 2>/dev/null
+        termux-notification-remove rho-daemon 2>/dev/null
     ) &
     echo $! > "$PIDFILE"
     

@@ -230,6 +230,13 @@ export default function (pi: ExtensionAPI) {
     pollTimer = setInterval(() => poll(), POLL_INTERVAL_MS);
   });
 
+  pi.on("session_shutdown", async () => {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  });
+
   pi.on("turn_start", async (_event, _ctx) => {
     ctx = _ctx;
     updateProviderFrom(_ctx.model);

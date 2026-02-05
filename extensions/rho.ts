@@ -316,7 +316,11 @@ export default function (pi: ExtensionAPI) {
 						.split("\n")
 						.some((line) => {
 							const trimmed = line.trim();
-							return trimmed && !trimmed.startsWith("#") && !trimmed.startsWith("-");
+							if (!trimmed || trimmed.startsWith("#")) return false;
+							if (trimmed.startsWith("-")) {
+								return /^-\s*\[[ xX]\]/.test(trimmed);
+							}
+							return true;
 						});
 					return hasContent ? content : null;
 				} catch {
@@ -349,6 +353,10 @@ export default function (pi: ExtensionAPI) {
 			join(ctx.cwd, ".heartbeat.md"),
 			join(ctx.cwd, ".rho-heartbeat.md"),
 		]);
+		if (!rhoMd && !heartbeatMd) {
+			scheduleNext(ctx);
+			return;
+		}
 		if (rhoMd) {
 			fullPrompt += `\n\n---\n\nRHO.md content:\n${rhoMd}`;
 		}
@@ -417,7 +425,7 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
-	// Listen for RHO_OK responses to suppress them
+	// Detect RHO_OK responses and show a notification (no suppression)
 	pi.on("agent_end", async (event, ctx) => {
 		const lastMessage = event.messages[event.messages.length - 1];
 		if (lastMessage?.role === "assistant" && lastMessage.content) {
@@ -434,7 +442,7 @@ export default function (pi: ExtensionAPI) {
 				trimmed.endsWith("\nRHO_OK");
 
 			if (isRhoOk && trimmed.length <= 300) {
-				// Suppress this message
+				// Notify that the check-in is OK
 				ctx.ui.notify("ρ: OK (no alerts)", "info");
 			}
 		}
@@ -536,7 +544,11 @@ export default function (pi: ExtensionAPI) {
 				}
 
 				case "status": {
-					const rhoMd = readRhoMd(ctx);
+					const rhoMd = readMarkdownFile([
+						join(ctx.cwd, "RHO.md"),
+						join(ctx.cwd, ".pi", "RHO.md"),
+						join(ctx.cwd, ".rho.md"),
+					]);
 					let text = `Rho status:\n`;
 					text += `- Enabled: ${state.enabled}\n`;
 					text += `- Interval: ${formatInterval(state.intervalMs)}\n`;

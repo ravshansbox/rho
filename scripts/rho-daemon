@@ -32,10 +32,11 @@ else
         termux-notification \
             --title "Rho Daemon" \
             --content "Check-ins active (30m)" \
+            --id rho-daemon \
             --ongoing \
-            --action "termux-tmux attach -t rho" \
+            --action "/data/data/com.termux/files/usr/bin/tmux attach -t rho" \
             --button1 "Check Now" \
-            --button1-action "termux-tmux send-keys -t rho '/rho now' Enter"
+            --button1-action "/data/data/com.termux/files/usr/bin/tmux send-keys -t rho '/rho now' Enter"
     fi
     
     echo "Rho running in tmux session: $SESSION_NAME"

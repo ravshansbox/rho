@@ -76,6 +76,18 @@ if [ -d "$REPO_DIR/scripts" ]; then
     ln -sf "$script" "$BIN_DIR/$(basename "$script")"
     echo "✓ Installed $(basename "$script") -> $BIN_DIR"
   done
+
+  # Install STT scripts (Termux mic binding expects ~/bin)
+  if [ -d "$REPO_DIR/scripts/bin" ]; then
+    STT_BIN_DIR="$HOME/bin"
+    mkdir -p "$STT_BIN_DIR"
+    for script in "$REPO_DIR/scripts/bin"/stt "$REPO_DIR/scripts/bin"/stt-send; do
+      [ -f "$script" ] || continue
+      chmod +x "$script"
+      ln -sf "$script" "$STT_BIN_DIR/$(basename "$script")"
+      echo "✓ Installed $(basename "$script") -> $STT_BIN_DIR"
+    done
+  fi
 fi
 
 # Bootstrap RHO.md if doesn't exist
