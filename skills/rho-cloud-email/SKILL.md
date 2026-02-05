@@ -127,7 +127,7 @@ curl -s -H "$AUTH" \
   "$API/agents/$AGENT_ID/inbox?status=held&limit=50" | jq '{count: .pagination.total, senders: [.data[].sender] | unique}'
 ```
 
-If there are held messages, inform the user: "{N} message(s) held from unknown senders: {senders}. Use `/email allow sender@example.com` or the sender allowlist API to approve specific senders."
+If there are held messages, inform the user: "{N} message(s) held from unknown senders: {senders}. Add approved senders via the allowlist API (see Sender Allowlist section above)."
 
 You MUST NOT read held message bodies. Report only the sender address and subject line from the list response.
 

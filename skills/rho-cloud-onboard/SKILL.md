@@ -128,8 +128,8 @@ Credentials: ~/.config/rho-cloud/credentials.json
 Claim URL:  {claim_url}
 Status:     {claimed or pending}
 
-The email extension will pick up new messages automatically.
-Send a test email to {handle}@runrho.dev to verify.
+Send a test email to {handle}@runrho.dev to verify delivery.
+Use the rho-cloud-email skill to check your inbox.
 ```
 
 ## Troubleshooting
