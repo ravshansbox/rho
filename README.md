@@ -84,9 +84,6 @@ The installer detects your OS and installs the right skills automatically.
 | `device` | ✓ | | | Battery, torch, vibration |
 | `dialog` | ✓ | | | Interactive input dialogs |
 | `tasker-xml` | ✓ | | | Create Tasker automations |
-| `code-assist` | ✓ | ✓ | ✓ | TDD-based code implementation |
-| `pdd` | ✓ | ✓ | ✓ | Prompt-driven design documents |
-| `rho-validate` | ✓ | ✓ | ✓ | Validate rho installation |
 | `update-pi` | ✓ | ✓ | ✓ | Update pi to latest version |
 
 ### Extensions by Platform
@@ -180,9 +177,6 @@ rho/
 │   ├── rho.ts
 │   └── usage-bars.ts
 ├── skills/                  # Core skills (all platforms)
-│   ├── code-assist/
-│   ├── pdd/
-│   ├── rho-validate/
 │   └── update-pi/
 ├── platforms/
 │   ├── android/
