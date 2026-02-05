@@ -14,6 +14,7 @@
  *   /email read <id>    -- Read a specific message
  *   /email act <id>     -- Mark message as acted
  *   /email check        -- Force an inbox check now
+ *   /email send <to> <subject> -- Send a quick email
  *
  * LLM tool:
  *   email(action="check")                    -- Poll inbox, return unread
@@ -21,6 +22,8 @@
  *   email(action="read", id="...")           -- Read single message
  *   email(action="act", id="...", log="...")  -- Mark acted with log
  *   email(action="archive", id="...")        -- Archive message
+ *   email(action="send", to="...", subject="...", body="...") -- Send email
+ *   email(action="send", to="...", body="...", in_reply_to="...") -- Reply
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
@@ -70,6 +73,14 @@ interface MessageResponse {
   error?: string;
 }
 
+interface SendResponse {
+  ok: boolean;
+  data?: { outbox_id: string; message_id: string; status: string };
+  error?: string;
+  tier?: string;
+  limit?: number;
+}
+
 // ─── API Client ──────────────────────────────────────────────────────
 
 function loadCredentials(): Credentials | null {
@@ -84,6 +95,18 @@ function loadCredentials(): Credentials | null {
 async function apiGet(creds: Credentials, path: string): Promise<unknown> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { Authorization: `Bearer ${creds.api_key}` },
+  });
+  return res.json();
+}
+
+async function apiPost(creds: Credentials, path: string, body: Record<string, unknown>): Promise<unknown> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${creds.api_key}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
   });
   return res.json();
 }
@@ -112,6 +135,18 @@ async function markMessage(creds: Credentials, msgId: string, status: string, ac
   const body: Record<string, unknown> = { status };
   if (actionLog) body.action_log = actionLog;
   return apiPatch(creds, `/agents/${creds.agent_id}/inbox/${msgId}`, body) as Promise<MessageResponse>;
+}
+
+async function sendOutbound(
+  creds: Credentials,
+  recipient: string,
+  subject: string,
+  body: string,
+  inReplyTo?: string,
+): Promise<SendResponse> {
+  const payload: Record<string, unknown> = { recipient, subject, body };
+  if (inReplyTo) payload.in_reply_to = inReplyTo;
+  return apiPost(creds, `/agents/${creds.agent_id}/outbox`, payload) as Promise<SendResponse>;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────
@@ -272,10 +307,14 @@ export default function (pi: ExtensionAPI) {
     description:
       `Check and manage the agent inbox (${creds.email}). ` +
       "Actions: check (poll for new mail), list (show messages), read (single message), " +
-      "act (mark as acted with log), archive (archive message).",
+      "act (mark as acted with log), archive (archive message), send (send an email).",
     parameters: Type.Object({
-      action: StringEnum(["check", "list", "read", "act", "archive"] as const),
+      action: StringEnum(["check", "list", "read", "act", "archive", "send"] as const),
       id: Type.Optional(Type.String({ description: "Message ID (for read/act/archive)" })),
+      to: Type.Optional(Type.String({ description: "Recipient email address (required for send)" })),
+      subject: Type.Optional(Type.String({ description: "Email subject (for send)" })),
+      body: Type.Optional(Type.String({ description: "Email body text (for send)" })),
+      in_reply_to: Type.Optional(Type.String({ description: "Inbox message ID to reply to (for send)" })),
       status: Type.Optional(Type.String({ description: "Filter for list: unread, read, acted, archived (default: unread)" })),
       log: Type.Optional(Type.String({ description: "Action log describing what was done (for act)" })),
       limit: Type.Optional(Type.Number({ description: "Max messages to return (default: 20)" })),
@@ -348,6 +387,35 @@ export default function (pi: ExtensionAPI) {
           };
         }
 
+        case "send": {
+          if (!params.to) {
+            return { content: [{ type: "text", text: "Error: recipient email required (use 'to' parameter)" }] };
+          }
+          if (!params.subject && !params.body) {
+            return { content: [{ type: "text", text: "Error: subject or body required" }] };
+          }
+          const sendResult = await sendOutbound(
+            creds,
+            params.to,
+            params.subject || "",
+            params.body || "",
+            params.in_reply_to,
+          );
+          if (!sendResult.ok) {
+            return {
+              content: [{ type: "text", text: `Send failed: ${sendResult.error || "unknown error"}` }],
+              details: { error: sendResult.error, tier: sendResult.tier, limit: sendResult.limit },
+            };
+          }
+          return {
+            content: [{
+              type: "text",
+              text: `Sent email to ${params.to}\nSubject: ${params.subject || "(no subject)"}\nOutbox ID: ${sendResult.data!.outbox_id}`,
+            }],
+            details: { outbox_id: sendResult.data!.outbox_id, status: "sent" },
+          };
+        }
+
         case "archive": {
           if (!params.id) {
             return { content: [{ type: "text", text: "Error: message ID required" }] };
@@ -367,7 +435,9 @@ export default function (pi: ExtensionAPI) {
 
     renderCall(args, theme) {
       let text = theme.fg("toolTitle", theme.bold("email ")) + theme.fg("muted", args.action);
-      if (args.id) text += ` ${theme.fg("accent", args.id.slice(0, 12) + "...")}`;
+      if (args.to) text += ` ${theme.fg("accent", args.to)}`;
+      else if (args.id) text += ` ${theme.fg("accent", args.id.slice(0, 12) + "...")}`;
+      if (args.subject) text += ` ${theme.fg("dim", `"${args.subject}"`)}`;
       if (args.status) text += ` ${theme.fg("dim", args.status)}`;
       return new Text(text, 0, 0);
     },
@@ -385,6 +455,9 @@ export default function (pi: ExtensionAPI) {
       }
       if (details?.count !== undefined) {
         return new Text(theme.fg("dim", `${details.count} message(s)`), 0, 0);
+      }
+      if (details?.status === "sent") {
+        return new Text(theme.fg("success", "✓ Sent"), 0, 0);
       }
       if (details?.status === "acted") {
         return new Text(theme.fg("success", "✓ Acted"), 0, 0);
@@ -407,7 +480,7 @@ export default function (pi: ExtensionAPI) {
   // ── Slash command ──
 
   pi.registerCommand("email", {
-    description: "Agent email: list, read <id>, act <id>, check",
+    description: "Agent email: list, read <id>, act <id>, check, send <to> <subject>",
     handler: async (args, ctx) => {
       const [subcmd, ...rest] = args.trim().split(/\s+/);
       const arg = rest.join(" ");
@@ -488,8 +561,30 @@ export default function (pi: ExtensionAPI) {
           break;
         }
 
+        case "send": {
+          // /email send <recipient> <subject...>
+          // Body is entered as the subject for quick sends; use the tool for full emails
+          const recipient = rest[0];
+          const subject = rest.slice(1).join(" ");
+          if (!recipient || !recipient.includes("@")) {
+            ctx.ui.notify("Usage: /email send <recipient@email.com> <subject>", "warning");
+            return;
+          }
+          if (!subject) {
+            ctx.ui.notify("Usage: /email send <recipient@email.com> <subject>", "warning");
+            return;
+          }
+          const result = await sendOutbound(creds, recipient, subject, "");
+          if (!result.ok) {
+            ctx.ui.notify(`Send failed: ${result.error || "unknown error"}`, "error");
+            return;
+          }
+          ctx.ui.notify(`Sent to ${recipient}: ${subject}`, "success");
+          break;
+        }
+
         default:
-          ctx.ui.notify("Usage: /email [status|check|list|read <id>|act <id>]", "warning");
+          ctx.ui.notify("Usage: /email [status|check|list|read <id>|act <id>|send <to> <subject>]", "warning");
       }
     },
   });
