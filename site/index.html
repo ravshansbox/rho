@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>rho -- a persistent AI agent</title>
+  <meta name="description" content="A persistent AI agent with memory, a heartbeat, and the ability to act. Runs locally on your phone, laptop, or server. Open source.">
+  <meta property="og:title" content="rho -- a persistent AI agent">
+  <meta property="og:description" content="A persistent AI agent with memory, a heartbeat, and the ability to act. Runs locally.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://runrho.dev">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:site" content="@tau_rho_ai">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90' fill='%2322c55e'>p</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0c0c0c;
+      --bg-alt: #111111;
+      --border: #1a1a1a;
+      --border-bright: #2a2a2a;
+      --text: #c8c8c8;
+      --text-muted: #666666;
+      --text-dim: #444444;
+      --green: #22c55e;
+      --green-dim: #1a9a4a;
+      --cyan: #5eead4;
+      --yellow: #fbbf24;
+      --red: #ef4444;
+      --mono: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html { font-size: 15px; }
+
+    body {
+      font-family: var(--mono);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: var(--green); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code { color: var(--cyan); }
+
+    .container {
+      max-width: 72ch;
+      margin: 0 auto;
+      padding: 0 1.5rem;
+    }
+
+    /* ---- Powerline nav ---- */
+    nav {
+      background: var(--bg-alt);
+      border-bottom: 1px solid var(--border);
+      padding: 0;
+      font-size: 0.85rem;
+    }
+
+    .nav-inner {
+      display: flex;
+      align-items: stretch;
+      max-width: 72ch;
+      margin: 0 auto;
+      padding: 0 1.5rem;
+    }
+
+    .nav-seg {
+      padding: 0.6rem 1rem;
+      display: flex;
+      align-items: center;
+      white-space: nowrap;
+    }
+
+    .nav-seg-logo {
+      color: var(--bg);
+      background: var(--green);
+      font-weight: 700;
+      padding: 0.6rem 1rem 0.6rem 1rem;
+    }
+
+    .nav-sep {
+      color: var(--green);
+      font-size: 1.6rem;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+      user-select: none;
+    }
+
+    .nav-sep-alt {
+      color: var(--border-bright);
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      margin-left: auto;
+      gap: 1.5rem;
+    }
+
+    .nav-links a {
+      color: var(--text-muted);
+      font-size: 0.8rem;
+    }
+
+    .nav-links a:hover {
+      color: var(--text);
+      text-decoration: none;
+    }
+
+    /* ---- Hero ---- */
+    .hero {
+      padding: 4rem 0 3rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .hero-tagline {
+      font-size: 0.8rem;
+      color: var(--text-dim);
+      margin-bottom: 1.5rem;
+    }
+
+    .hero h1 {
+      font-size: 1.4rem;
+      font-weight: 600;
+      line-height: 1.4;
+      margin-bottom: 1.5rem;
+      color: var(--text);
+    }
+
+    .hero h1 em {
+      font-style: normal;
+      color: var(--green);
+    }
+
+    .hero-desc {
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      max-width: 60ch;
+      margin-bottom: 2.5rem;
+    }
+
+    /* ---- Install block ---- */
+    .install {
+      background: var(--bg-alt);
+      border: 1px solid var(--border);
+      padding: 1rem 1.25rem;
+      cursor: pointer;
+      margin-bottom: 0.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .install:hover { border-color: var(--border-bright); }
+
+    .install .prompt {
+      color: var(--green);
+      user-select: none;
+    }
+
+    .install .cmd {
+      color: var(--text);
+      font-size: 0.85rem;
+    }
+
+    .install .hint {
+      color: var(--text-dim);
+      font-size: 0.7rem;
+      margin-left: auto;
+      user-select: none;
+    }
+
+    .install-note {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      margin-bottom: 2rem;
+    }
+
+    .install-note a { color: var(--text-muted); }
+
+    /* ---- Demo terminal ---- */
+    .demo {
+      border: 1px solid var(--border);
+      background: var(--bg-alt);
+      margin-bottom: 0;
+    }
+
+    .demo-bar {
+      display: flex;
+      align-items: center;
+      padding: 0.4rem 0.75rem;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      font-size: 0.7rem;
+      color: var(--text-dim);
+      gap: 0.5rem;
+    }
+
+    .demo-bar .seg-active {
+      background: var(--green);
+      color: var(--bg);
+      padding: 0.1rem 0.5rem;
+    }
+
+    .demo-bar .seg-inactive {
+      padding: 0.1rem 0.5rem;
+    }
+
+    .demo-bar .right {
+      margin-left: auto;
+    }
+
+    .demo img {
+      width: 100%;
+      display: block;
+    }
+
+    /* ---- Platforms ---- */
+    .platforms {
+      display: flex;
+      gap: 0;
+      margin-top: 2rem;
+      font-size: 0.8rem;
+      border: 1px solid var(--border);
+      width: fit-content;
+    }
+
+    .platform {
+      padding: 0.4rem 1rem;
+      color: var(--text-muted);
+      border-right: 1px solid var(--border);
+    }
+
+    .platform:last-child { border-right: none; }
+    .platform.active { color: var(--green); }
+
+    /* ---- Section ---- */
+    section {
+      padding: 3rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .section-header {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 0.25rem;
+    }
+
+    section h2 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin-bottom: 1.5rem;
+    }
+
+    /* ---- Feature list (not cards, just lines) ---- */
+    .feature-list {
+      list-style: none;
+    }
+
+    .feature-list li {
+      padding: 0.75rem 0;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 1rem;
+      font-size: 0.85rem;
+    }
+
+    .feature-list li:last-child { border-bottom: none; }
+
+    .feature-list .fl-name {
+      color: var(--green);
+      min-width: 16ch;
+      flex-shrink: 0;
+    }
+
+    .feature-list .fl-desc {
+      color: var(--text-muted);
+    }
+
+    /* ---- Steps ---- */
+    .steps-list {
+      list-style: none;
+      counter-reset: step;
+    }
+
+    .steps-list li {
+      counter-increment: step;
+      padding: 0.6rem 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.85rem;
+      display: flex;
+      gap: 1rem;
+    }
+
+    .steps-list li:last-child { border-bottom: none; }
+
+    .steps-list li::before {
+      content: counter(step) ".";
+      color: var(--text-dim);
+      min-width: 2ch;
+    }
+
+    .steps-list .step-title {
+      color: var(--text);
+      min-width: 12ch;
+      flex-shrink: 0;
+    }
+
+    .steps-list .step-desc {
+      color: var(--text-muted);
+    }
+
+    /* ---- Skills table ---- */
+    .skills-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+    }
+
+    .skills-table th {
+      text-align: left;
+      color: var(--text-dim);
+      font-weight: 400;
+      padding: 0.4rem 0;
+      border-bottom: 1px solid var(--border-bright);
+    }
+
+    .skills-table td {
+      padding: 0.35rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .skills-table td:first-child {
+      color: var(--text);
+    }
+
+    .skills-table td:last-child {
+      color: var(--text-dim);
+      text-align: right;
+    }
+
+    /* ---- Providers ---- */
+    .provider-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(18ch, 1fr));
+      gap: 0;
+      border: 1px solid var(--border);
+      margin-bottom: 1rem;
+    }
+
+    .provider {
+      padding: 0.6rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+      border-right: 1px solid var(--border);
+      font-size: 0.8rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .provider .p-name { color: var(--text); }
+    .provider .p-via { color: var(--text-dim); font-size: 0.7rem; }
+    .provider .p-check { color: var(--green); }
+
+    .provider-note {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+    }
+
+    /* ---- iPhone SSH ---- */
+    .ssh-steps {
+      list-style: none;
+      font-size: 0.85rem;
+    }
+
+    .ssh-steps li {
+      padding: 0.5rem 0;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 0.75rem;
+    }
+
+    .ssh-steps li:last-child { border-bottom: none; }
+    .ssh-steps .s-num { color: var(--text-dim); min-width: 2ch; }
+    .ssh-steps .s-text { color: var(--text-muted); }
+    .ssh-steps code { font-size: 0.8rem; }
+
+    .ssh-hosts {
+      display: flex;
+      gap: 0;
+      margin-top: 1rem;
+      border: 1px solid var(--border);
+      width: fit-content;
+      font-size: 0.8rem;
+    }
+
+    .ssh-host {
+      padding: 0.35rem 0.75rem;
+      border-right: 1px solid var(--border);
+      color: var(--text-muted);
+    }
+
+    .ssh-host:last-child { border-right: none; }
+    .ssh-host.free { color: var(--green); }
+
+    /* ---- Cost comparison ---- */
+    .cost-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 0.5rem 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.85rem;
+    }
+
+    .cost-row:last-child { border-bottom: none; }
+    .cost-row .label { color: var(--text-muted); }
+    .cost-row .value { color: var(--text); }
+    .cost-row .value.highlight { color: var(--green); }
+    .cost-row .value.dim { color: var(--text-dim); }
+    .cost-row .value.strikethrough { text-decoration: line-through; color: var(--text-dim); }
+
+    .cost-note {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      margin-top: 0.75rem;
+    }
+
+    /* ---- CTA ---- */
+    .cta {
+      padding: 3rem 0;
+      border-bottom: none;
+    }
+
+    .cta h2 {
+      font-size: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .cta-links {
+      display: flex;
+      gap: 2rem;
+      font-size: 0.85rem;
+    }
+
+    .cta-links a {
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .cta-links a:hover { color: var(--green); }
+
+    .cta-links .arrow { color: var(--text-dim); }
+
+    /* ---- Footer ---- */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 1.5rem 0;
+      font-size: 0.75rem;
+      color: var(--text-dim);
+    }
+
+    .footer-inner {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    footer a {
+      color: var(--text-dim);
+      margin-left: 1.5rem;
+    }
+
+    footer a:hover { color: var(--text-muted); }
+
+    /* ---- Responsive ---- */
+    @media (max-width: 600px) {
+      html { font-size: 14px; }
+      .nav-links { display: none; }
+      .feature-list li { flex-direction: column; gap: 0.25rem; }
+      .feature-list .fl-name { min-width: auto; }
+      .steps-list li { flex-direction: column; gap: 0.25rem; }
+      .steps-list .step-title { min-width: auto; }
+      .cta-links { flex-direction: column; gap: 1rem; }
+      .footer-inner { flex-direction: column; gap: 0.5rem; }
+      .platforms { flex-wrap: wrap; }
+      .cost-row { font-size: 0.8rem; }
+      .provider-grid { grid-template-columns: 1fr 1fr; }
+      .ssh-steps li { flex-direction: column; gap: 0.25rem; }
+      .ssh-hosts { flex-wrap: wrap; }
+    }
+  </style>
+</head>
+<body>
+  <nav>
+    <div class="nav-inner">
+      <div class="nav-seg nav-seg-logo">rho</div><div class="nav-sep"></div><div class="nav-seg" style="color:var(--text-muted);">persistent ai agent</div>
+      <div class="nav-links">
+        <a href="#features">features</a>
+        <a href="#how">setup</a>
+        <a href="#cost">cost</a>
+        <a href="#skills">skills</a>
+        <a href="https://github.com/mikeyobrien/rho">source</a>
+      </div>
+    </div>
+  </nav>
+
+  <main>
+    <section class="hero">
+      <div class="container">
+        <div class="hero-tagline">v0.1 // open source // local-first</div>
+        <h1>an ai agent that <em>persists</em>.<br>memory. heartbeat. action.</h1>
+        <p class="hero-desc">
+          rho runs on your device -- phone, laptop, server. it remembers across
+          sessions, checks in on a schedule, and acts when you're not looking.
+          not a chat window. not a cloud service. a process that stays running.
+        </p>
+
+        <div class="install" onclick="copyInstall()" title="click to copy">
+          <span class="prompt">$</span>
+          <span class="cmd">curl -fsSL https://runrho.dev/install | bash</span>
+          <span class="hint" id="copy-hint">click to copy</span>
+        </div>
+        <div class="install-note">
+          requires <a href="https://f-droid.org/packages/com.termux/">termux</a> on android, or node.js + tmux on macos/linux
+        </div>
+
+        <div class="demo">
+          <div class="demo-bar">
+            <span class="seg-active">0:rho*</span>
+            <span class="seg-inactive">1:work</span>
+            <span class="right">"rho" 0:bash</span>
+          </div>
+          <img src="demo.gif" alt="rho agent running in tmux" loading="lazy">
+        </div>
+
+        <div class="platforms">
+          <div class="platform active">android/termux</div>
+          <div class="platform">macos</div>
+          <div class="platform">linux</div>
+          <div class="platform">iphone (via ssh)</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="features">
+      <div class="container">
+        <div class="section-header">// features</div>
+        <h2>what it does</h2>
+        <ul class="feature-list">
+          <li>
+            <span class="fl-name">memory</span>
+            <span class="fl-desc">learnings and preferences persist across sessions. your agent remembers corrections, patterns, and context. consolidates daily.</span>
+          </li>
+          <li>
+            <span class="fl-name">heartbeat</span>
+            <span class="fl-desc">periodic autonomous check-ins. reads your checklist, runs scheduled tasks, monitors what matters. configurable interval.</span>
+          </li>
+          <li>
+            <span class="fl-name">device control</span>
+            <span class="fl-desc">on android with tasker: read screens, tap buttons, open apps, type text. your phone becomes an agent platform.</span>
+          </li>
+          <li>
+            <span class="fl-name">brain</span>
+            <span class="fl-desc">structured knowledge store. not chat logs -- core knowledge, memories, context, archives.</span>
+          </li>
+          <li>
+            <span class="fl-name">extensions</span>
+            <span class="fl-desc">typescript extensions loaded at runtime. memory viewer, usage tracking, web search, tasker bridge. write your own.</span>
+          </li>
+          <li>
+            <span class="fl-name">local-first</span>
+            <span class="fl-desc">data stays on your device. no cloud for your memories. bring your own llm provider. you own everything.</span>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="how">
+      <div class="container">
+        <div class="section-header">// setup</div>
+        <h2>running in five minutes</h2>
+        <ol class="steps-list">
+          <li>
+            <span class="step-title">install</span>
+            <span class="step-desc">one command. installs runtime, extensions, skills, brain scaffold. works on termux, macos, linux.</span>
+          </li>
+          <li>
+            <span class="step-title">login</span>
+            <span class="step-desc">use your existing claude pro, chatgpt plus, or gemini subscription. no api keys. no surprise bills.</span>
+          </li>
+          <li>
+            <span class="step-title">configure</span>
+            <span class="step-desc">edit <code>RHO.md</code> -- your checklist. edit <code>SOUL.md</code> -- your agent's personality. both are just markdown.</span>
+          </li>
+          <li>
+            <span class="step-title">run</span>
+            <span class="step-desc"><code>rho</code> starts a tmux session. talk to it or let the heartbeat handle things. it runs until you stop it.</span>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <section id="providers">
+      <div class="container">
+        <div class="section-header">// providers</div>
+        <h2>use your existing subscription</h2>
+        <div class="provider-grid">
+          <div class="provider"><span class="p-check">*</span> <span class="p-name">Claude Pro</span> <span class="p-via">OAuth</span></div>
+          <div class="provider"><span class="p-check">*</span> <span class="p-name">ChatGPT Plus</span> <span class="p-via">OAuth</span></div>
+          <div class="provider"><span class="p-check">*</span> <span class="p-name">Gemini</span> <span class="p-via">OAuth</span></div>
+          <div class="provider"><span class="p-check">*</span> <span class="p-name">Codex</span> <span class="p-via">OAuth</span></div>
+          <div class="provider"><span class="p-check">*</span> <span class="p-name">Anthropic API</span> <span class="p-via">key</span></div>
+          <div class="provider"><span class="p-check">*</span> <span class="p-name">OpenAI API</span> <span class="p-via">key</span></div>
+        </div>
+        <p class="provider-note">
+          <code>rho login</code> connects via OAuth. no api keys needed for consumer subscriptions.
+          the agent picks the cheapest model for heartbeat check-ins automatically.
+        </p>
+      </div>
+    </section>
+
+    <section id="cost">
+      <div class="container">
+        <div class="section-header">// cost</div>
+        <h2>what it costs to run</h2>
+        <div class="cost-row">
+          <span class="label">llm provider</span>
+          <span class="value highlight">$0 extra -- uses your existing subscription</span>
+        </div>
+        <div class="cost-row">
+          <span class="label">heartbeat (48 check-ins/day)</span>
+          <span class="value">~$0.05/day with smart model routing</span>
+        </div>
+        <div class="cost-row">
+          <span class="label">hosting (android)</span>
+          <span class="value highlight">$0 -- runs on your phone</span>
+        </div>
+        <div class="cost-row">
+          <span class="label">hosting (iphone via ssh)</span>
+          <span class="value">$0-5/mo -- free tier VPS available</span>
+        </div>
+        <div class="cost-row">
+          <span class="label">open-source agent frameworks</span>
+          <span class="value dim">$20-600/mo in API costs</span>
+        </div>
+        <div class="cost-row">
+          <span class="label">managed agent services</span>
+          <span class="value dim">$20-50/mo + API costs</span>
+        </div>
+        <p class="cost-note">
+          most agent frameworks require dedicated API keys and burn tokens on every
+          heartbeat. rho uses your existing coding subscription via OAuth and routes
+          heartbeats to the cheapest available model.
+        </p>
+      </div>
+    </section>
+
+    <section id="skills">
+      <div class="container">
+        <div class="section-header">// skills</div>
+        <h2>built-in capabilities</h2>
+        <table class="skills-table">
+          <thead>
+            <tr><th>skill</th><th>platform</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>notification</td><td>all</td></tr>
+            <tr><td>clipboard</td><td>all</td></tr>
+            <tr><td>open-url</td><td>all</td></tr>
+            <tr><td>text-to-speech</td><td>all</td></tr>
+            <tr><td>code-assist</td><td>all</td></tr>
+            <tr><td>web-search</td><td>all</td></tr>
+            <tr><td>sms</td><td>android</td></tr>
+            <tr><td>camera</td><td>android</td></tr>
+            <tr><td>location</td><td>android</td></tr>
+            <tr><td>contacts</td><td>android</td></tr>
+            <tr><td>speech-to-text</td><td>android</td></tr>
+            <tr><td>screen-control</td><td>android + tasker</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="iphone">
+      <div class="container">
+        <div class="section-header">// iphone / ipad</div>
+        <h2>ssh in from anywhere</h2>
+        <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:1.5rem;">
+          rho runs on a server. connect from your phone with any ssh client.
+          the tmux config is mobile-optimized out of the box.
+        </p>
+        <ol class="ssh-steps">
+          <li>
+            <span class="s-num">1</span>
+            <span class="s-text">set up a server -- home machine, VPS, or free Oracle Cloud instance</span>
+          </li>
+          <li>
+            <span class="s-num">2</span>
+            <span class="s-text">install rho: <code>curl -fsSL https://runrho.dev/install | bash</code></span>
+          </li>
+          <li>
+            <span class="s-num">3</span>
+            <span class="s-text">start in background: <code>rho login && rho -d</code></span>
+          </li>
+          <li>
+            <span class="s-num">4</span>
+            <span class="s-text">connect from iPhone with <a href="https://apps.apple.com/app/termius-terminal-ssh-client/id549039908">Termius</a> or any SSH client</span>
+          </li>
+        </ol>
+        <div class="ssh-hosts">
+          <div class="ssh-host free">oracle cloud (free)</div>
+          <div class="ssh-host">hetzner ($4/mo)</div>
+          <div class="ssh-host">digitalocean ($4/mo)</div>
+          <div class="ssh-host">home + tailscale</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="cta">
+      <div class="container">
+        <h2>get started</h2>
+        <div class="cta-links">
+          <a href="https://github.com/mikeyobrien/rho"><span class="arrow">--></span> source on github</a>
+          <a href="https://github.com/mikeyobrien/rho#install"><span class="arrow">--></span> installation docs</a>
+          <a href="https://x.com/tau_rho_ai"><span class="arrow">--></span> @tau_rho_ai on x</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container">
+      <div class="footer-inner">
+        <span>rho // mit license // 2026</span>
+        <div>
+          <a href="https://github.com/mikeyobrien/rho">github</a>
+          <a href="https://x.com/tau_rho_ai">x</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    function copyInstall() {
+      navigator.clipboard.writeText('curl -fsSL https://runrho.dev/install | bash').then(() => {
+        const h = document.getElementById('copy-hint');
+        h.textContent = 'copied';
+        setTimeout(() => { h.textContent = 'click to copy'; }, 2000);
+      });
+    }
+  </script>
+</body>
+</html>

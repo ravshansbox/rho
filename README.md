@@ -24,7 +24,7 @@ Prerequisites: Node.js (18+), tmux, git. The installer checks and tells you what
 Install [Termux](https://f-droid.org/packages/com.termux/) and [Termux:API](https://f-droid.org/packages/com.termux.api/) from F-Droid, then:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mikeyobrien/rho/main/platforms/android/bootstrap.sh | bash
+curl -fsSL https://runrho.dev/install | bash
 ```
 
 Or step by step:

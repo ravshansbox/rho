@@ -1,3 +1,7 @@
+# Site build artifacts
+site/.wrangler/
+site/node_modules/
+
 # Ignore all skills by default
 skills/*/
 

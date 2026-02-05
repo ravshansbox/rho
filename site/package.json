@@ -1,0 +1,9 @@
+{
+  "name": "rho-site",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Landing page for runrho.dev",
+  "scripts": {
+    "deploy": "npx wrangler pages deploy . --project-name=rho-site"
+  }
+}
