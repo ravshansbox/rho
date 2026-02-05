@@ -1,186 +1,180 @@
 # rho
 
-Micro AI assistant that lives in Termux, built on [pi coding agent](https://github.com/badlogic/pi-mono). Pi is the base, Rho is the personality.
+An AI agent that lives on your phone. Not a cloud service, not a browser tab -- a persistent agent running in your pocket with memory, a heartbeat, and the ability to see and touch your screen.
 
-Influenced by [OpenClaw](https://github.com/openclaw/openclaw) — the idea of an agent with continuous presence, periodic check-ins, and persistent memory.
-
-## Demo
+Built on [pi coding agent](https://github.com/badlogic/pi-mono).
 
 ![Rho demo](docs/demo.gif)
 
-Run it locally: [docs/demo.md](docs/demo.md)
+## Install
 
-## Structure
+Prerequisites: [Termux](https://f-droid.org/packages/com.termux/) and [Termux:API](https://f-droid.org/packages/com.termux.api/) from F-Droid.
 
-```
-rho/
-├── extensions/         # Custom tools and event handlers
-│   ├── rho.ts          # Continuous presence (periodic check-ins)
-│   ├── brain.ts        # Persistent memory system
-│   ├── brave-search.ts # Web search
-│   └── tasker.ts       # Android UI automation via Tasker
-├── skills/             # On-demand capability packages
-├── scripts/            # Shell scripts for daemon management
-│   ├── rho-daemon      # Start background daemon
-│   ├── rho-stop        # Stop daemon
-│   ├── rho-trigger     # Manual check-in trigger
-│   └── rho-status      # Check daemon status
-├── tasker/             # Importable Tasker profiles (.prf.xml)
-├── brain/              # Default brain files (copied on install)
-├── AGENTS.md.template    # Identity template (injected on install)
-├── RHO.md.template       # Checklist template for check-ins
-├── HEARTBEAT.md.template # Scheduled tasks template for check-ins
-└── install.sh            # Setup script
-```
-
-## Installation
-
-### Quick install (scripts only)
+Then one command:
 
 ```bash
-# Add rho apt repository
-echo "deb [trusted=yes] https://mikeyobrien.github.io/rho/apt ./" > $PREFIX/etc/apt/sources.list.d/rho.list
-
-# Install
-pkg update && pkg install rho
+curl -fsSL https://raw.githubusercontent.com/mikeyobrien/rho/main/bootstrap.sh | bash
 ```
 
-This installs `rho-daemon`, `rho-status`, `rho-stop`, `rho-trigger` to PATH.
+This installs everything: Node.js, pi, rho extensions, skills, brain, and walks you through API key setup.
 
-### Full install (extensions, skills, brain)
+Or step by step:
 
 ```bash
+pkg install nodejs-lts tmux git
+npm install -g @mariozechner/pi-coding-agent
 git clone https://github.com/mikeyobrien/rho.git ~/projects/rho
-cd ~/projects/rho
-./install.sh
+cd ~/projects/rho && ./install.sh
 ```
 
-This will:
-- Symlink extensions and skills to `~/.pi/agent/`
-- Create `~/AGENTS.md` with your runtime environment
-- Bootstrap `~/.pi/brain/` with defaults
+## Run
+
+```bash
+rho           # Start and attach
+rho -d        # Start in background
+rho status    # Is it running?
+rho stop      # Stop
+```
+
+Inside a session:
+
+```
+/rho status           Show heartbeat state
+/rho now              Trigger check-in immediately
+/rho interval 30m     Set check-in interval
+/rho enable/disable   Toggle heartbeat
+```
+
+## What it does
+
+**Heartbeat**: Rho checks in periodically (default: 30 min). Each check-in reads your `~/RHO.md` checklist and `~/HEARTBEAT.md` scheduled tasks, runs what needs running, and reports back.
+
+**Memory**: Persistent brain across sessions. Learnings, preferences, and context accumulate over time in `~/.pi/brain/`. Your agent remembers what you told it yesterday.
+
+**Tasker integration** *(optional)*: With [Tasker](https://play.google.com/store/apps/details?id=net.dinglisch.android.taskerm) installed, your agent can read screens, tap buttons, open apps, scroll, and type. It can use your phone like you do.
+
+**Skills**: On-demand capability packages for common tasks -- clipboard, notifications, SMS, camera, speech-to-text, location, and more. The agent loads them when needed.
+
+## Customize
+
+### RHO.md -- Your checklist
+
+Create `~/RHO.md` with tasks for the heartbeat to check:
+
+```markdown
+# RHO Checklist
+
+## Quick Scan
+- [ ] Any unread notifications?
+- [ ] Battery below 20%?
+
+## Active Work  
+- [ ] Check build status on ~/projects/myapp
+
+## Recurring
+- [ ] Run ~/backup.sh every 6 hours
+```
+
+### HEARTBEAT.md -- Scheduled tasks
+
+Create `~/HEARTBEAT.md` for time-based triggers:
+
+```markdown
+# Heartbeat Tasks
+
+## Weather
+- Schedule: 8am daily
+- Action: Check weather and notify if rain expected
+
+## Journal
+- Schedule: 9pm daily
+- Action: Write daily journal entry to ~/notes/
+```
+
+### SOUL.md -- Personality
+
+Create `~/SOUL.md` to give your agent a voice and identity. This is where you define who it is, what it cares about, and how it communicates.
+
+### Brain
+
+The brain lives at `~/.pi/brain/`:
+
+- `core.jsonl` -- Behavior, identity
+- `memory.jsonl` -- Learnings and preferences (grows over time)
+- `context.jsonl` -- Project-specific context
+- `memory/YYYY-MM-DD.md` -- Daily memory log
+
+Use the `memory` tool or `/brain` command to interact with it.
 
 ## Extensions
 
-### rho.ts
-Continuous presence system. Periodic check-ins to surface urgent tasks, follow-ups, and session health issues without interrupting flow.
+| Extension | What it does |
+|-----------|-------------|
+| `rho.ts` | Heartbeat, check-ins, continuous presence |
+| `brain.ts` | Persistent memory across sessions |
+| `brave-search.ts` | Web search via Brave API |
+| `tasker.ts` | Android UI automation via Tasker |
 
-**Agent loop (pi extension wiring):**
-```mermaid
-flowchart TD
-    A[Pi loads extension] --> B[rho.ts]
-    B --> C[register tools + /rho command]
-    B --> D[session start/switch/fork]
-    D --> E[load state + schedule timer]
-    E --> F[triggerCheck]
-    F --> G{tmux available}
-    G -->|yes| H[spawn heartbeat in tmux]
-    G -->|no| I[send follow-up message]
-    H --> J[agent run]
-    I --> J
-    J --> K[agent_end]
-    K --> L{RHO_OK}
-    L -->|yes| M[notify OK]
-    L -->|no| N[alert + update status]
-    M --> E
-    N --> E
-```
+## Skills
 
-**Commands:**
-- `/rho status` — Show check-in state
-- `/rho enable/disable` — Toggle check-ins  
-- `/rho now` — Trigger check-in immediately
-- `/rho interval 30m` — Set interval (5m-24h, or 0 to disable)
+Rho comes with skills for common Android tasks. The agent loads them on demand:
 
-**Tools:**
-- `rho_control(action, interval?)` — LLM-callable control
+| Skill | Capability |
+|-------|-----------|
+| `termux-notification` | System notifications with buttons |
+| `termux-sms` | Read and send SMS |
+| `termux-stt` | Speech-to-text |
+| `termux-tts` | Text-to-speech |
+| `termux-clipboard` | Clipboard read/write |
+| `termux-media` | Audio, camera, recording |
+| `termux-location` | GPS/network location |
+| `termux-contacts` | Contact lookup |
+| `termux-device` | Battery, torch, vibration |
+| `termux-dialog` | Interactive input dialogs |
+| `tasker-xml` | Create Tasker automations |
+| `code-assist` | TDD-based code implementation |
+| `pdd` | Prompt-driven design documents |
 
-**Daemon (runs in background):**
-```bash
-rho-daemon      # Start background daemon (tmux + wake lock)
-rho-stop        # Stop daemon
-rho-trigger     # Manual trigger
-rho-status      # Check if running
-```
+## Tasker setup (optional)
 
-**Tasker Integration:**
-- `RhoDaemonBoot.prf.xml` — Auto-start on boot
-- `RhoPeriodic.prf.xml` — Trigger every 30m  
-- `RhoManual.prf.xml` — Intent handler `rho.tasker.check`
+For UI automation (reading screens, tapping elements, controlling apps):
 
-**Checklist:** Create `~/RHO.md` for checklists and `~/HEARTBEAT.md` for scheduled tasks (both auto-read on each check-in).
+1. Install [Tasker](https://play.google.com/store/apps/details?id=net.dinglisch.android.taskerm) and [AutoInput](https://play.google.com/store/apps/details?id=com.joaomgcd.autoinput)
+2. In Tasker: long-press home icon → Import Project → select `tasker/Rho.prj.xml`
+3. Enable the imported profiles
 
-### brain.ts
-Persistent memory (learnings, preferences, context)
-
-### brave-search.ts
-Web search via Brave Search API
-
-### tasker.ts
-Android UI automation via Tasker + AutoInput. Enables the agent to control the Android device.
-
-**Actions:**
-- `open_url` — Open URL in browser
-- `click` — Click element by text or coordinates
-- `type` — Type text into focused field
-- `read_screen` — Read visible UI text
-- `read_elements` — Get UI elements with coordinates for precise clicking
-- `screenshot` — Capture screen (requires one-time ADB permission grant)
-- `scroll` — Scroll up/down
-- `back` / `home` — Navigation
-- `wait_for` — Wait for specific text to appear
-
-**Requirements:**
-- [Tasker](https://play.google.com/store/apps/details?id=net.dinglisch.android.taskerm) app
-
-**Optional: AutoInput**
-
-[AutoInput](https://play.google.com/store/apps/details?id=com.joaomgcd.autoinput) is a Tasker plugin that enables UI automation (clicking elements, reading screen text, gestures). Required for:
-- `click`, `read_screen`, `read_elements`, `scroll` actions
-- X/Twitter navigation
-- Any app control automation
-
-If you have AutoInput installed, import the Rho Tasker project:
-
-1. Copy `tasker/Rho.prj.xml` to your device
-2. Open Tasker → Long-press the home icon (bottom left) → Import Project
-3. Select `Rho.prj.xml`
-4. Enable the imported profiles
-
-This provides all the Intent handlers (`rho.tasker.*`) needed for UI automation.
-
-**Optional (for screenshot without permission dialog):**
+Optional (screenshot without permission dialog):
 ```bash
 # Enable wireless ADB in Developer Options, then:
 adb pair <ip>:<port> <pairing-code>
 adb connect <ip>:<port>
 adb shell appops set net.dinglisch.android.taskerm PROJECT_MEDIA allow
-adb shell appops set com.joaomgcd.autoinput PROJECT_MEDIA allow
 ```
 
-## Environment Variables
+## Project structure
+
+```
+rho/
+├── extensions/         # Pi extensions (heartbeat, memory, search, tasker)
+├── skills/             # On-demand capability packages
+├── scripts/            # Daemon management (rho, rho-daemon, rho-stop, etc.)
+├── tasker/             # Importable Tasker profiles
+├── brain/              # Default brain files
+├── bootstrap.sh        # One-command installer
+├── install.sh          # Setup script (symlinks, templates, brain)
+├── AGENTS.md.template  # Agent operating principles template
+├── RHO.md.template     # Check-in checklist template
+└── HEARTBEAT.md.template # Scheduled tasks template
+```
+
+## Environment variables
 
 ```bash
-export BRAVE_API_KEY="your-key"  # Required for brave-search
+BRAVE_API_KEY="..."     # For web search (optional)
 ```
 
-## Brain
+## Links
 
-Rho uses a JSONL-based memory system at `~/.pi/brain/`:
-
-- `core.jsonl` — Identity, behavior, user info
-- `memory.jsonl` — Learnings and preferences (grows over time)
-- `context.jsonl` — Project-specific context (matched by cwd)
-- `memory/YYYY-MM-DD.md` — Daily Markdown log of stored learnings/preferences
-
-**Auto-memory (LLM-based):** after each agent turn, Rho can extract durable learnings/preferences using the current model and append them to `memory.jsonl` (deduped, max 3 items/turn).
-
-**Pre-compaction flush:** before `/compact`, Rho runs the same extractor on messages being summarized so durable learnings/preferences are stored before the context shrinks.
-
-Controls:
-- `RHO_AUTO_MEMORY=0` — disable auto-memory (also disables compaction flush)
-- `RHO_AUTO_MEMORY_DEBUG=1` — show debug toasts
-- `RHO_COMPACT_MEMORY_FLUSH=0` — disable pre-compaction memory flush
-- `RHO_DAILY_MEMORY=0` — disable daily Markdown memory files
-
-Use the `memory` tool or `/brain` command to interact with it.
+- [Demo walkthrough](docs/demo.md)
+- [pi coding agent](https://github.com/badlogic/pi-mono)
+- [@tau_rho_ai](https://x.com/tau_rho_ai) -- Tau, an agent running on rho
