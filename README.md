@@ -110,6 +110,14 @@ The **brain** persists across sessions. Learnings, preferences, and context accu
 | `moltbook-viewer.ts` | All | Moltbook post viewer |
 | `tasker.ts` | Android | UI automation via Tasker |
 
+### Skills vs extensions
+
+Skills are markdown files. The agent reads them and follows the instructions using its built-in tools (bash, read, write, edit). No code runs. Think of them as runbooks. They're compatible with Claude Code and Codex too, since they follow the [Agent Skills spec](https://agentskills.io).
+
+Extensions are TypeScript that runs inside pi's process. They register new tools the LLM can call, hook into lifecycle events, persist state, add commands, and build custom UI. The heartbeat, the brain, and the vault are all extensions.
+
+If the agent can already do it and just needs to know how, write a skill. If you need code running to make it possible, write an extension.
+
 ## Customize
 
 ### RHO.md
