@@ -374,7 +374,8 @@ async function runAutoMemoryExtraction(
 
   for (const { model, apiKey } of candidates) {
     try {
-      response = await complete(
+      const maxTokens = Math.min(512, model.maxTokens || 512);
+      const result = await complete(
         model,
         {
           messages: [
@@ -385,8 +386,16 @@ async function runAutoMemoryExtraction(
             },
           ],
         },
-        { apiKey, maxTokens: 512, signal: options?.signal }
+        { apiKey, maxTokens, signal: options?.signal }
       );
+      // complete() doesn't throw on API errors — check stopReason
+      if (result.stopReason === "error") {
+        if (AUTO_MEMORY_DEBUG) {
+          console.error(`Auto-memory error from ${model.id}: ${result.errorMessage}`);
+        }
+        continue;
+      }
+      response = result;
       break;
     } catch (e) {
       if (AUTO_MEMORY_DEBUG) {
@@ -453,51 +462,145 @@ async function runAutoMemoryExtraction(
   return { storedLearnings, storedPrefs };
 }
 
-// Memory consolidation
-type ConsolidationResponse = {
-  learnings: Array<{ id: string; text: string }>;
-  preferences: Array<{ id: string; category: string; text: string }>;
+// ── Memory consolidation (hybrid: deterministic dedup + LLM semantic pass) ──
+
+// Phase 1: Deterministic dedup using word-overlap similarity (Jaccard)
+function tokenize(text: string): Set<string> {
+  return new Set(
+    text.toLowerCase().replace(/[^a-z0-9\s/._-]/g, "").split(/\s+/).filter(w => w.length > 2)
+  );
+}
+
+function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 && b.size === 0) return 1;
+  let intersection = 0;
+  for (const w of a) { if (b.has(w)) intersection++; }
+  const union = a.size + b.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
+const JACCARD_THRESHOLD = 0.6;
+const CONTAINMENT_THRESHOLD = 0.8; // If 80%+ of A's tokens are in B, A is redundant
+
+function containmentRatio(smaller: Set<string>, larger: Set<string>): number {
+  if (smaller.size === 0) return 1;
+  let contained = 0;
+  for (const w of smaller) { if (larger.has(w)) contained++; }
+  return contained / smaller.size;
+}
+
+function deterministicDedup(entries: Entry[]): { kept: Entry[]; removed: Entry[] } {
+  const learnings = entries.filter((e): e is LearningEntry => e.type === "learning");
+  const preferences = entries.filter((e): e is PreferenceEntry => e.type === "preference");
+  const others = entries.filter(e => e.type !== "learning" && e.type !== "preference");
+
+  function dedupGroup<T extends LearningEntry | PreferenceEntry>(
+    items: T[],
+    getText: (e: T) => string
+  ): { kept: T[]; removed: T[] } {
+    const tokenized = items.map(e => ({ entry: e, tokens: tokenize(getText(e)), len: getText(e).length }));
+    const removed = new Set<string>();
+
+    // Pass 1: Jaccard similarity clustering
+    const clusters: T[][] = [];
+    for (let i = 0; i < tokenized.length; i++) {
+      if (removed.has(tokenized[i].entry.id)) continue;
+      const cluster: T[] = [tokenized[i].entry];
+      for (let j = i + 1; j < tokenized.length; j++) {
+        if (removed.has(tokenized[j].entry.id)) continue;
+        if (jaccardSimilarity(tokenized[i].tokens, tokenized[j].tokens) >= JACCARD_THRESHOLD) {
+          cluster.push(tokenized[j].entry);
+          removed.add(tokenized[j].entry.id);
+        }
+      }
+      clusters.push(cluster);
+    }
+
+    // From each cluster, keep the longest entry
+    const keptAfterJaccard: T[] = [];
+    const removedEntries: T[] = [];
+    for (const cluster of clusters) {
+      const sorted = cluster.sort((a, b) => getText(b).length - getText(a).length);
+      keptAfterJaccard.push(sorted[0]);
+      removedEntries.push(...sorted.slice(1));
+    }
+
+    // Pass 2: Containment check -- if a shorter entry's tokens are mostly in a longer one, remove it
+    const keptTokenized = keptAfterJaccard.map(e => ({ entry: e, tokens: tokenize(getText(e)), len: getText(e).length }));
+    const containmentRemoved = new Set<string>();
+    for (let i = 0; i < keptTokenized.length; i++) {
+      if (containmentRemoved.has(keptTokenized[i].entry.id)) continue;
+      for (let j = 0; j < keptTokenized.length; j++) {
+        if (i === j || containmentRemoved.has(keptTokenized[j].entry.id)) continue;
+        // Check if j is contained in i (j is shorter, i is longer)
+        if (keptTokenized[j].len < keptTokenized[i].len) {
+          if (containmentRatio(keptTokenized[j].tokens, keptTokenized[i].tokens) >= CONTAINMENT_THRESHOLD) {
+            containmentRemoved.add(keptTokenized[j].entry.id);
+          }
+        }
+      }
+    }
+
+    const finalKept = keptAfterJaccard.filter(e => !containmentRemoved.has(e.id));
+    const containmentRemovedEntries = keptAfterJaccard.filter(e => containmentRemoved.has(e.id));
+
+    return { kept: finalKept, removed: [...removedEntries, ...containmentRemovedEntries] };
+  }
+
+  const dedupedLearnings = dedupGroup(learnings, e => e.text);
+  const dedupedPreferences = dedupGroup(preferences, e => e.text);
+
+  return {
+    kept: [...others, ...dedupedLearnings.kept, ...dedupedPreferences.kept],
+    removed: [...dedupedLearnings.removed, ...dedupedPreferences.removed],
+  };
+}
+
+// Phase 2: LLM semantic pass — ask for IDs to remove + rewrites (small output)
+type SemanticResponse = {
+  remove: string[];
+  rewrite: Array<{ id: string; text: string }>;
 };
 
-function buildConsolidationPrompt(entries: Entry[]): string {
+function buildSemanticPrompt(entries: Entry[]): string {
   const learnings = entries.filter((e): e is LearningEntry => e.type === "learning");
   const preferences = entries.filter((e): e is PreferenceEntry => e.type === "preference");
 
   let entriesText = "LEARNINGS:\n";
-  for (const l of learnings) {
-    entriesText += `[${l.id}] ${l.text}\n`;
-  }
+  for (const l of learnings) entriesText += `[${l.id}] ${l.text}\n`;
   entriesText += "\nPREFERENCES:\n";
-  for (const p of preferences) {
-    entriesText += `[${p.id}] [${p.category}] ${p.text}\n`;
-  }
+  for (const p of preferences) entriesText += `[${p.id}] [${p.category}] ${p.text}\n`;
 
   return [
-    "You are a memory consolidation system. Deduplicate and consolidate these memory entries.",
+    "You are a memory consolidation system. Review these entries and identify IDs to REMOVE.",
     "",
-    "Rules:",
-    "- Merge entries that express the same fact or preference into ONE clear entry.",
-    "- When merging, use the ID of the OLDEST entry in the group.",
-    "- Keep the most informative/complete version when merging.",
-    "- Remove entries that are strict subsets of other entries.",
-    "- Remove entries that are clearly obsolete or superseded.",
-    "- Do NOT invent new information — only consolidate what exists.",
-    "- Keep entries concise (under 200 characters).",
-    "- For preferences, preserve the category. If merging preferences with different categories, use the most specific one.",
-    "- Return ALL entries that should be kept — both merged and untouched ones.",
+    "ONLY remove entries that are clearly one of:",
+    "1. SEMANTIC DUPLICATES: nearly identical meaning to another entry (keep the longer one, remove the shorter)",
+    "2. SUPERSEDED: directly contradicted by a newer entry about the same specific topic",
+    "",
+    "KEEP everything else. When in doubt, KEEP. Be very conservative.",
+    "Do NOT remove: environment setup, API details, config paths, tool usage patterns, architecture facts, user preferences.",
+    "Do NOT remove entries just because they seem old or specific -- specificity is valuable.",
+    "",
+    "Also identify entries to REWRITE: where 2 entries about the exact same topic should merge (use the surviving entry's ID).",
     "",
     entriesText,
     "",
-    "Output strict JSON:",
-    '{"learnings":[{"id":"kept-id","text":"consolidated text"}],"preferences":[{"id":"kept-id","category":"...","text":"consolidated text"}]}',
+    "IMPORTANT: Output ONLY a JSON object with two keys: 'remove' (array of IDs to delete) and 'rewrite' (array of {id, text} to update).",
+    "Do NOT return all entries. Do NOT echo back entries you want to keep. ONLY list changes.",
+    "No markdown, no code fences, no explanation. Raw JSON only.",
+    "Example: {\"remove\":[\"abc\",\"def\"],\"rewrite\":[{\"id\":\"ghi\",\"text\":\"merged text\"}]}",
   ].join("\n");
 }
 
-function parseConsolidationResponse(text: string): ConsolidationResponse | null {
+function parseSemanticResponse(text: string): SemanticResponse | null {
   const jsonText = extractJsonObject(text);
   if (!jsonText) return null;
   try {
-    return JSON.parse(jsonText) as ConsolidationResponse;
+    const parsed = JSON.parse(jsonText);
+    if (!Array.isArray(parsed.remove)) return null;
+    if (!Array.isArray(parsed.rewrite)) return null;
+    return parsed as SemanticResponse;
   } catch {
     return null;
   }
@@ -506,153 +609,122 @@ function parseConsolidationResponse(text: string): ConsolidationResponse | null 
 async function runConsolidation(
   ctx: ExtensionContext,
   options?: { signal?: AbortSignal; dryRun?: boolean }
-): Promise<{ before: number; after: number; removed: number } | null> {
-  const resolved = await resolveSmallModel(ctx);
-  if (!resolved) return null;
-
+): Promise<{ before: number; after: number; removed: number; error?: string } | null> {
   const entries = readJsonl<Entry>(MEMORY_FILE);
-  if (entries.length < 5) return null; // Not enough to bother
+  if (entries.length < 5) return { before: entries.length, after: entries.length, removed: 0, error: "too few entries (< 5)" };
 
-  const prompt = buildConsolidationPrompt(entries);
+  // ── Phase 1: Deterministic dedup (instant, no LLM) ──
+  const { kept: phase1Kept, removed: phase1Removed } = deterministicDedup(entries);
+  const phase1Count = phase1Removed.length;
 
-  // Try the resolved model first; if it fails (e.g. OAuth not supported on older models),
-  // fall back to the current session model which is known to work.
-  let response;
-  const candidates = [resolved];
-  if (resolved.model.id !== ctx.model?.id && ctx.model) {
-    const fallbackKey = await ctx.modelRegistry.getApiKey(ctx.model);
-    if (fallbackKey) candidates.push({ model: ctx.model, apiKey: fallbackKey });
-  }
+  // ── Phase 2: LLM semantic pass (small output: just IDs + rewrites) ──
+  let phase2Removes: string[] = [];
+  let phase2Rewrites: SemanticResponse["rewrite"] = [];
+  let llmError: string | undefined;
 
-  for (const { model, apiKey } of candidates) {
-    try {
-      if (AUTO_MEMORY_DEBUG) {
-        console.error(`Consolidation trying: ${model.name} (${model.provider})`);
+  const resolved = await resolveSmallModel(ctx);
+  if (resolved && phase1Kept.length > 5) {
+    const candidates = [resolved];
+    if (resolved.model.id !== ctx.model?.id && ctx.model) {
+      const fallbackKey = await ctx.modelRegistry.getApiKey(ctx.model);
+      if (fallbackKey) candidates.push({ model: ctx.model, apiKey: fallbackKey });
+    }
+
+    const prompt = buildSemanticPrompt(phase1Kept);
+    let semantic: SemanticResponse | null = null;
+
+    for (const { model, apiKey } of candidates) {
+      if (options?.signal?.aborted) break;
+      try {
+        const maxTokens = Math.min(4096, model.maxTokens || 4096);
+        const result = await complete(
+          model,
+          {
+            messages: [
+              { role: "user" as const, content: [{ type: "text" as const, text: prompt }], timestamp: Date.now() },
+              { role: "assistant" as const, content: [{ type: "text" as const, text: '{"remove":[' }], timestamp: Date.now() },
+            ],
+          },
+          { apiKey, maxTokens, signal: options?.signal }
+        );
+        if (result.stopReason === "error") {
+          llmError = `${model.id}: ${result.errorMessage || "error"}`;
+          continue;
+        }
+        const responseText = result.content
+          .filter((c): c is { type: "text"; text: string } => c.type === "text")
+          .map((c) => c.text).join("\n").trim();
+        semantic = parseSemanticResponse('{"remove":[' + responseText);
+        if (semantic) break;
+        llmError = `${model.id}: JSON parse failed`;
+      } catch (e) {
+        llmError = `${model.id}: ${e instanceof Error ? e.message : String(e)}`;
       }
-      response = await complete(
-        model,
-        {
-          messages: [
-            {
-              role: "user" as const,
-              content: [{ type: "text" as const, text: prompt }],
-              timestamp: Date.now(),
-            },
-          ],
-        },
-        { apiKey, maxTokens: 16384, signal: options?.signal }
-      );
-      break; // success
-    } catch (e) {
-      if (AUTO_MEMORY_DEBUG) {
-        console.error(`Consolidation failed with ${model.id}: ${e instanceof Error ? e.message : String(e)}`);
-      }
-      continue; // try next candidate
+    }
+
+    if (semantic) {
+      // Cap phase 2 removals at 15% of entries to prevent LLM over-pruning
+      const maxRemoves = Math.max(5, Math.floor(phase1Kept.length * 0.15));
+      phase2Removes = semantic.remove.slice(0, maxRemoves);
+      phase2Rewrites = semantic.rewrite.slice(0, 20);
     }
   }
 
-  if (!response) return null;
+  // ── Apply results ──
+  const removeSet = new Set(phase2Removes);
+  const rewriteMap = new Map(phase2Rewrites.map(r => [r.id, r.text]));
 
-  const responseText = response.content
-    .filter((c): c is { type: "text"; text: string } => c.type === "text")
-    .map((c) => c.text)
-    .join("\n")
-    .trim();
-
-  if (AUTO_MEMORY_DEBUG) {
-    console.error(`Consolidation response length: ${responseText.length} chars`);
-    console.error(`Consolidation response preview: ${responseText.slice(0, 200)}`);
-  }
-
-  const parsed = parseConsolidationResponse(responseText);
-  if (!parsed) {
-    if (AUTO_MEMORY_DEBUG) {
-      console.error(`Consolidation parse failed. Raw response:\n${responseText.slice(0, 500)}`);
-    }
-    return null;
-  }
-
-  // Build a lookup of existing entries by ID for metadata preservation
-  const entryMap = new Map<string, Entry>();
-  for (const e of entries) entryMap.set(e.id, e);
-
+  // Build final entry list from phase1 survivors, applying phase2 removes + rewrites
   const newEntries: Entry[] = [];
-
-  // Process consolidated learnings
-  for (const cl of parsed.learnings) {
-    const existing = entryMap.get(cl.id) as LearningEntry | undefined;
-    const normalized = normalizeMemoryText(cl.text);
-    if (!normalized) continue;
-
-    if (existing && existing.type === "learning") {
-      // Preserve metadata, update text
-      newEntries.push({
-        ...existing,
-        text: normalized,
-        last_used: today(),
-      });
+  for (const entry of phase1Kept) {
+    if (removeSet.has(entry.id)) continue;
+    const rewrite = rewriteMap.get(entry.id);
+    if (rewrite) {
+      const normalized = normalizeMemoryText(rewrite);
+      if (entry.type === "learning") {
+        newEntries.push({ ...entry, text: normalized, last_used: today() } as LearningEntry);
+      } else if (entry.type === "preference") {
+        newEntries.push({ ...entry, text: normalized } as PreferenceEntry);
+      } else {
+        newEntries.push(entry);
+      }
     } else {
-      // New consolidated entry (shouldn't happen often but handle it)
-      newEntries.push({
-        id: cl.id || nanoid(),
-        type: "learning",
-        text: normalized,
-        used: 0,
-        last_used: today(),
-        created: today(),
-      } as LearningEntry);
-    }
-  }
-
-  // Process consolidated preferences
-  for (const cp of parsed.preferences) {
-    const existing = entryMap.get(cp.id) as PreferenceEntry | undefined;
-    const normalized = normalizeMemoryText(cp.text);
-    if (!normalized) continue;
-
-    if (existing && existing.type === "preference") {
-      newEntries.push({
-        ...existing,
-        text: normalized,
-        category: sanitizeCategory(cp.category),
-      });
-    } else {
-      newEntries.push({
-        id: cp.id || nanoid(),
-        type: "preference",
-        category: sanitizeCategory(cp.category),
-        text: normalized,
-        created: today(),
-      } as PreferenceEntry);
+      newEntries.push(entry);
     }
   }
 
   const before = entries.length;
   const after = newEntries.length;
+  const totalRemoved = before - after;
 
   if (options?.dryRun) {
-    return { before, after, removed: before - after };
+    return { before, after, removed: totalRemoved, error: llmError ? `phase2: ${llmError}` : undefined };
   }
 
-  // Safety: don't write if consolidation removed more than 60% (LLM might have hallucinated)
-  if (after < before * 0.4) {
-    return null; // Too aggressive, abort
+  // Safety: don't write if consolidation removed more than 40%
+  if (after < before * 0.6) {
+    return { before, after, removed: totalRemoved, error: `too aggressive: ${after}/${before} kept (${Math.round(after/before*100)}%), need > 60%` };
   }
 
-  // Archive removed entries before overwriting
-  const keptIds = new Set(newEntries.map((e) => e.id));
-  const removed = entries.filter((e) => !keptIds.has(e.id));
-  if (removed.length > 0) {
+  // Archive removed entries
+  const keptIds = new Set(newEntries.map(e => e.id));
+  const allRemoved = entries.filter(e => !keptIds.has(e.id));
+  if (allRemoved.length > 0) {
     ensureDir();
-    for (const r of removed) {
+    for (const r of allRemoved) {
       appendJsonl(ARCHIVE_FILE, { ...r, archived: today(), reason: "consolidation" });
     }
   }
 
-  // Write consolidated memory
   writeJsonl(MEMORY_FILE, newEntries);
 
-  return { before, after, removed: before - after };
+  const parts = [`phase1 dedup: -${phase1Count}`];
+  if (phase2Removes.length > 0 || phase2Rewrites.length > 0) {
+    parts.push(`phase2 llm: -${phase2Removes.length} removed, ${phase2Rewrites.length} rewritten`);
+  }
+  if (llmError) parts.push(`(phase2 warning: ${llmError})`);
+
+  return { before, after, removed: totalRemoved, error: llmError ? parts.join("; ") : undefined };
 }
 
 // Migrate from legacy ~/.pi/brain/ to ~/.rho/brain/
@@ -992,18 +1064,22 @@ export default function (pi: ExtensionAPI) {
             const result = await runConsolidation(ctx);
             if (!result) {
               return {
-                content: [{ type: "text", text: "Consolidation failed or not enough entries to consolidate." }],
+                content: [{ type: "text", text: "Consolidation returned null (unexpected)." }],
                 details: { error: true },
               };
             }
+            // If nothing was removed and there's an error, it's a real failure
+            if (result.removed === 0 && result.error) {
+              return {
+                content: [{ type: "text", text: `Consolidation failed: ${result.error}` }],
+                details: result,
+              };
+            }
             updateBrainWidget(ctx);
+            const msg = `Consolidated: ${result.before} → ${result.after} entries (removed ${result.removed}).`;
+            const warning = result.error ? ` Note: ${result.error}` : "";
             return {
-              content: [
-                {
-                  type: "text",
-                  text: `Consolidated: ${result.before} → ${result.after} entries (removed ${result.removed}). Removed entries archived.`,
-                },
-              ],
+              content: [{ type: "text", text: msg + warning }],
               details: result,
             };
           } catch (error) {
@@ -1050,17 +1126,19 @@ export default function (pi: ExtensionAPI) {
         });
         ctx.ui.notify(matches.length ? `Found ${matches.length} matches` : "No matches", "info");
       } else if (subcmd === "consolidate") {
-        ctx.ui.notify("🧠 Consolidating memories (small model)...", "info");
+        ctx.ui.notify("🧠 Consolidating memories...", "info");
         try {
           const result = await runConsolidation(ctx);
-          if (result) {
+          if (!result) {
+            ctx.ui.notify("🧠 Consolidation returned null", "warning");
+          } else if (result.removed === 0 && result.error) {
+            ctx.ui.notify(`🧠 Failed: ${result.error}`, "warning");
+          } else {
             ctx.ui.notify(
-              `🧠 Consolidated: ${result.before} → ${result.after} (removed ${result.removed})`,
+              `🧠 ${result.before} → ${result.after} (removed ${result.removed})`,
               "info"
             );
             updateBrainWidget(ctx);
-          } else {
-            ctx.ui.notify("🧠 Consolidation failed or too few entries", "warning");
           }
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
