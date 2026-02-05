@@ -30,13 +30,14 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { execSync } from "node:child_process";
 
 // ─── Config ──────────────────────────────────────────────────────────
 
 const CREDS_PATH = join(process.env.HOME || "", ".config", "rho-cloud", "credentials.json");
+const CONFIG_PATH = join(process.env.HOME || "", ".config", "rho-cloud", "config.json");
 const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 const API_BASE = "https://api.runrho.dev/v1";
 
@@ -44,6 +45,106 @@ interface Credentials {
   api_key: string;
   agent_id: string;
   email: string;
+}
+
+// ─── Sender Allowlist ────────────────────────────────────────────────
+//
+// Emails from unknown senders are stored server-side but NEVER surfaced
+// to the LLM. This prevents prompt injection via email. Unknown sender
+// emails are held for manual review.
+//
+// Config at ~/.config/rho-cloud/config.json:
+//   {
+//     "allowed_senders": ["you@gmail.com", "*@yourcompany.com"],
+//     "unknown_sender_action": "hold"  // "hold" | "reject" | "notify"
+//   }
+//
+// Patterns: exact match ("user@domain.com") or domain wildcard ("*@domain.com")
+
+interface EmailConfig {
+  allowed_senders?: string[];
+  unknown_sender_action?: "hold" | "reject" | "notify";
+}
+
+function loadConfig(): EmailConfig {
+  if (!existsSync(CONFIG_PATH)) return {};
+  try {
+    return JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
+  } catch {
+    return {};
+  }
+}
+
+function saveConfig(config: EmailConfig): void {
+  try {
+    const dir = join(process.env.HOME || "", ".config", "rho-cloud");
+    writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+  } catch {
+    // not critical
+  }
+}
+
+function isSenderAllowed(sender: string, allowlist: string[]): boolean {
+  if (allowlist.length === 0) return true; // no allowlist = allow all (backwards compat)
+  const senderLower = sender.toLowerCase().trim();
+  for (const pattern of allowlist) {
+    const p = pattern.toLowerCase().trim();
+    if (p === senderLower) return true;
+    // Domain wildcard: *@domain.com
+    if (p.startsWith("*@")) {
+      const domain = p.slice(2);
+      if (senderLower.endsWith("@" + domain)) return true;
+    }
+  }
+  return false;
+}
+
+function filterAllowedMessages(messages: InboxMessage[], allowlist: string[]): {
+  allowed: InboxMessage[];
+  blocked: InboxMessage[];
+} {
+  if (allowlist.length === 0) return { allowed: messages, blocked: [] };
+  const allowed: InboxMessage[] = [];
+  const blocked: InboxMessage[] = [];
+  for (const msg of messages) {
+    if (isSenderAllowed(msg.sender, allowlist)) {
+      allowed.push(msg);
+    } else {
+      blocked.push(msg);
+    }
+  }
+  return { allowed, blocked };
+}
+
+// ─── Server-side allowlist sync ──────────────────────────────────────
+
+async function syncAllowlistToServer(creds: Credentials, patterns: string[]): Promise<boolean> {
+  const result = await apiFetch(creds, "PUT", `/agents/${creds.agent_id}/senders`, {
+    allowed_senders: patterns,
+  }) as { ok?: boolean };
+  return result?.ok === true;
+}
+
+async function addSenderToServer(creds: Credentials, pattern: string): Promise<boolean> {
+  const result = await apiFetch(creds, "POST", `/agents/${creds.agent_id}/senders`, {
+    pattern,
+  }) as { ok?: boolean };
+  return result?.ok === true;
+}
+
+async function removeSenderFromServer(creds: Credentials, pattern: string): Promise<boolean> {
+  const result = await apiFetch(creds, "DELETE", `/agents/${creds.agent_id}/senders`, {
+    pattern,
+  }) as { ok?: boolean };
+  return result?.ok === true;
+}
+
+async function fetchServerAllowlist(creds: Credentials): Promise<string[]> {
+  const result = await apiFetch(creds, "GET", `/agents/${creds.agent_id}/senders`) as {
+    ok?: boolean;
+    data?: { allowed_senders?: string[] };
+  };
+  return result?.data?.allowed_senders || [];
 }
 
 interface InboxMessage {
@@ -251,17 +352,20 @@ export default function (pi: ExtensionAPI) {
   let lastSeenCount = 0;
   let lastSeenIds: Set<string> = new Set();
   let currentUnread = 0;
+  let currentHeld = 0; // messages from unknown senders
   let consecutivePollFailures = 0;
+  let config = loadConfig();
 
   // ── Status bar ──
 
   const updateStatus = (ctx: ExtensionContext) => {
     if (!ctx.hasUI) return;
     const theme = ctx.ui.theme;
+    const heldSuffix = currentHeld > 0 ? theme.fg("dim", ` +${currentHeld} held`) : "";
     if (currentUnread > 0) {
-      ctx.ui.setStatus("email", theme.fg("warning", `✉ ${currentUnread}`));
+      ctx.ui.setStatus("email", theme.fg("warning", `✉ ${currentUnread}`) + heldSuffix);
     } else {
-      ctx.ui.setStatus("email", theme.fg("dim", "✉ 0"));
+      ctx.ui.setStatus("email", theme.fg("dim", "✉ 0") + heldSuffix);
     }
   };
 
@@ -279,14 +383,16 @@ export default function (pi: ExtensionAPI) {
       }
 
       consecutivePollFailures = 0;
-      const newCount = result.pagination.total;
+      const allowlist = config.allowed_senders || [];
+      const { allowed, blocked } = filterAllowedMessages(result.data, allowlist);
+
       const newIds = new Set(result.data.map((m) => m.id));
 
       // Detect genuinely new messages (not just ones we haven't processed)
-      const brandNew = result.data.filter((m) => !lastSeenIds.has(m.id));
+      const brandNew = allowed.filter((m) => !lastSeenIds.has(m.id));
+      const brandNewBlocked = blocked.filter((m) => !lastSeenIds.has(m.id));
 
       if (brandNew.length > 0 && lastSeenIds.size > 0) {
-        // We had a previous baseline and new mail arrived
         const subjects = brandNew.map((m) => m.subject || "(no subject)").join(", ");
         const senders = [...new Set(brandNew.map((m) => m.sender))].join(", ");
         notify(
@@ -302,8 +408,18 @@ export default function (pi: ExtensionAPI) {
         }
       }
 
-      currentUnread = newCount;
-      lastSeenCount = newCount;
+      // Notify about held messages separately (user-facing, not agent-facing)
+      if (brandNewBlocked.length > 0 && lastSeenIds.size > 0) {
+        const senders = [...new Set(brandNewBlocked.map((m) => m.sender))].join(", ");
+        notify(
+          `✉ ${brandNewBlocked.length} held (unknown sender)`,
+          `From: ${senders} -- use /email held to review`
+        );
+      }
+
+      currentUnread = allowed.length;
+      currentHeld = blocked.length;
+      lastSeenCount = result.pagination.total;
       lastSeenIds = newIds;
       updateStatus(ctx);
     } catch {
@@ -314,8 +430,29 @@ export default function (pi: ExtensionAPI) {
     }
   };
 
+  const syncAllowlist = async () => {
+    try {
+      const serverList = await fetchServerAllowlist(creds);
+      const localList = config.allowed_senders || [];
+      // Merge: union of server + local, deduplicated
+      const merged = [...new Set([...serverList, ...localList])];
+      const changed = merged.length !== localList.length ||
+        merged.some(s => !localList.includes(s));
+      if (changed) {
+        config.allowed_senders = merged;
+        saveConfig(config);
+        // Push merged list back to server
+        await syncAllowlistToServer(creds, merged);
+      }
+    } catch {
+      // Non-fatal -- local config still applies
+    }
+  };
+
   const startPolling = (ctx: ExtensionContext) => {
     if (pollTimer) clearInterval(pollTimer);
+    // Sync allowlist on startup
+    syncAllowlist();
     // Initial check
     pollInbox(ctx, false);
     // Then every 5 minutes
@@ -368,19 +505,24 @@ export default function (pi: ExtensionAPI) {
       switch (params.action) {
         case "check": {
           await pollInbox(ctx, false);
-          const result = await fetchInbox(creds, "unread", params.limit || 20);
+          const result = await fetchInbox(creds, "unread", params.limit || 50);
           if (!result.ok) {
             return { content: [{ type: "text", text: `Error: ${result.error || "API error"}` }] };
           }
-          if (result.data.length === 0) {
-            return {
-              content: [{ type: "text", text: "No unread messages." }],
-              details: { unread: 0 },
-            };
+          const allowlist = config.allowed_senders || [];
+          const { allowed, blocked } = filterAllowedMessages(result.data, allowlist);
+          let text = "";
+          if (allowed.length === 0) {
+            text = "No unread messages from allowed senders.";
+          } else {
+            text = formatMessageList(allowed, allowed.length);
+          }
+          if (blocked.length > 0) {
+            text += `\n\n${blocked.length} message(s) held from unknown senders. Use /email held to review.`;
           }
           return {
-            content: [{ type: "text", text: formatMessageList(result.data, result.pagination.total) }],
-            details: { unread: result.pagination.total },
+            content: [{ type: "text", text }],
+            details: { unread: allowed.length, held: blocked.length },
           };
         }
 
@@ -390,9 +532,15 @@ export default function (pi: ExtensionAPI) {
           if (!result.ok) {
             return { content: [{ type: "text", text: `Error: ${result.error || "API error"}` }] };
           }
+          // Filter by allowlist for unread/read statuses (not acted/archived -- those were already approved)
+          const allowlist = config.allowed_senders || [];
+          const shouldFilter = status === "unread" || status === "read";
+          const data = shouldFilter
+            ? filterAllowedMessages(result.data, allowlist).allowed
+            : result.data;
           return {
-            content: [{ type: "text", text: formatMessageList(result.data, result.pagination.total) }],
-            details: { count: result.pagination.total, status },
+            content: [{ type: "text", text: formatMessageList(data, data.length) }],
+            details: { count: data.length, status },
           };
         }
 
@@ -403,6 +551,14 @@ export default function (pi: ExtensionAPI) {
           const result = await fetchMessage(creds, params.id);
           if (!result.ok) {
             return { content: [{ type: "text", text: `Error: ${result.error || "message not found"}` }] };
+          }
+          // Block reads of messages from unknown senders
+          const allowlist = config.allowed_senders || [];
+          if (allowlist.length > 0 && !isSenderAllowed(result.data.sender, allowlist)) {
+            return {
+              content: [{ type: "text", text: `Blocked: message from unknown sender (${result.data.sender}). Use /email allow ${result.data.sender} to approve.` }],
+              details: { blocked: true, sender: result.data.sender },
+            };
           }
           // Auto-mark as read when the LLM reads it
           if (result.data.status === "unread") {
@@ -627,8 +783,89 @@ export default function (pi: ExtensionAPI) {
           break;
         }
 
+        case "allow": {
+          // /email allow user@example.com  OR  /email allow *@example.com
+          const sender = arg.trim().toLowerCase();
+          if (!sender || (!sender.includes("@"))) {
+            ctx.ui.notify("Usage: /email allow <sender@domain.com> or /email allow *@domain.com", "warning");
+            return;
+          }
+          if (!config.allowed_senders) config.allowed_senders = [];
+          if (config.allowed_senders.includes(sender)) {
+            ctx.ui.notify(`${sender} is already allowed`, "info");
+            return;
+          }
+          config.allowed_senders.push(sender);
+          saveConfig(config);
+          // Sync to server (defense in depth)
+          const addOk = await addSenderToServer(creds, sender);
+          ctx.ui.notify(
+            `Allowed: ${sender}${addOk ? " (synced to server)" : " (local only, server sync failed)"}`,
+            "success"
+          );
+          await pollInbox(ctx);
+          break;
+        }
+
+        case "revoke": {
+          const sender = arg.trim().toLowerCase();
+          if (!sender) {
+            ctx.ui.notify("Usage: /email revoke <sender@domain.com>", "warning");
+            return;
+          }
+          if (!config.allowed_senders) {
+            ctx.ui.notify("No allowlist configured", "info");
+            return;
+          }
+          const idx = config.allowed_senders.indexOf(sender);
+          if (idx === -1) {
+            ctx.ui.notify(`${sender} is not in the allowlist`, "info");
+            return;
+          }
+          config.allowed_senders.splice(idx, 1);
+          saveConfig(config);
+          // Sync to server
+          const rmOk = await removeSenderFromServer(creds, sender);
+          ctx.ui.notify(
+            `Revoked: ${sender}${rmOk ? " (synced to server)" : " (local only, server sync failed)"}`,
+            "success"
+          );
+          await pollInbox(ctx);
+          break;
+        }
+
+        case "senders": {
+          const list = config.allowed_senders || [];
+          if (list.length === 0) {
+            ctx.ui.notify("No allowlist configured (all senders accepted)", "info");
+          } else {
+            ctx.ui.notify(`Allowed senders (${list.length}):\n${list.map(s => `  ${s}`).join("\n")}`, "info");
+          }
+          break;
+        }
+
+        case "held": {
+          // Show messages from unknown senders (user can review and /email allow)
+          const result = await fetchInbox(creds, "unread", 50);
+          if (!result.ok) {
+            ctx.ui.notify("Failed to fetch inbox", "error");
+            return;
+          }
+          const allowlist = config.allowed_senders || [];
+          const { blocked } = filterAllowedMessages(result.data, allowlist);
+          if (blocked.length === 0) {
+            ctx.ui.notify("No held messages", "info");
+            return;
+          }
+          const lines = blocked.map(
+            (m) => `${m.id.slice(0, 12)}  ${m.sender}\n    ${m.subject || "(no subject)"}`
+          );
+          ctx.ui.notify(`${blocked.length} held from unknown senders:\n${lines.join("\n")}\n\nUse /email allow <sender> to approve`, "warning");
+          break;
+        }
+
         default:
-          ctx.ui.notify("Usage: /email [status|check|list|read <id>|act <id>|send <to> <subject>]", "warning");
+          ctx.ui.notify("Usage: /email [status|check|list|read|act|send|allow|revoke|senders|held]", "warning");
       }
     },
   });
