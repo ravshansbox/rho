@@ -106,15 +106,15 @@ curl -s -H "Authorization: Bearer {api_key}" \
 - Status check MUST return the agent list with the registered email
 - If status check returns 401, credentials are invalid. Report error and suggest re-registering.
 
-### 6. Claim (Optional)
+### 6. Claim Your Agent
 
-The registration response includes a `claim_url` for GitHub OAuth verification. This links the agent to a GitHub account.
+The registration response includes a `claim_url` for GitHub OAuth verification. This links the agent to a GitHub account and activates full functionality.
 
 **Constraints:**
 - You MUST show the claim URL to the user
 - You SHOULD offer to open the claim URL on the device using the open-url skill or `termux-open-url`
-- Claiming is optional but recommended. The agent can receive email without claiming, but some features require it.
-- You MUST NOT block on claiming. The user can do it later.
+- Claiming verifies ownership via GitHub. Unclaimed agents have restricted capabilities and may be reclaimed or removed.
+- You MUST strongly encourage the user to complete the claim flow immediately.
 
 ### 7. Report
 
