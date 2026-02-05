@@ -92,35 +92,68 @@ function loadCredentials(): Credentials | null {
   }
 }
 
+async function apiFetch(
+  creds: Credentials,
+  method: string,
+  path: string,
+  body?: Record<string, unknown>,
+  retries = 2,
+): Promise<unknown> {
+  const url = `${API_BASE}${path}`;
+  const headers: Record<string, string> = { Authorization: `Bearer ${creds.api_key}` };
+  if (body) headers["Content-Type"] = "application/json";
+
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(url, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+
+      // Don't retry client errors (4xx), only server errors (5xx) and network issues
+      if (res.status >= 400 && res.status < 500) {
+        try { return await res.json(); } catch {
+          return { ok: false, error: `HTTP ${res.status}: ${res.statusText}` };
+        }
+      }
+
+      if (!res.ok) {
+        lastError = new Error(`HTTP ${res.status}: ${res.statusText}`);
+        if (attempt < retries) {
+          await new Promise((r) => setTimeout(r, 1000 * (attempt + 1))); // linear backoff
+          continue;
+        }
+        try { return await res.json(); } catch {
+          return { ok: false, error: lastError.message };
+        }
+      }
+
+      try { return await res.json(); } catch {
+        return { ok: false, error: "Invalid JSON response from API" };
+      }
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (attempt < retries) {
+        await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+        continue;
+      }
+    }
+  }
+  return { ok: false, error: `Network error after ${retries + 1} attempts: ${lastError?.message || "unknown"}` };
+}
+
 async function apiGet(creds: Credentials, path: string): Promise<unknown> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { Authorization: `Bearer ${creds.api_key}` },
-  });
-  return res.json();
+  return apiFetch(creds, "GET", path);
 }
 
 async function apiPost(creds: Credentials, path: string, body: Record<string, unknown>): Promise<unknown> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${creds.api_key}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-  return res.json();
+  return apiFetch(creds, "POST", path, body);
 }
 
 async function apiPatch(creds: Credentials, path: string, body: Record<string, unknown>): Promise<unknown> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: "PATCH",
-    headers: {
-      Authorization: `Bearer ${creds.api_key}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-  return res.json();
+  return apiFetch(creds, "PATCH", path, body);
 }
 
 async function fetchInbox(creds: Credentials, status = "unread", limit = 20): Promise<InboxResponse> {
@@ -218,6 +251,7 @@ export default function (pi: ExtensionAPI) {
   let lastSeenCount = 0;
   let lastSeenIds: Set<string> = new Set();
   let currentUnread = 0;
+  let consecutivePollFailures = 0;
 
   // ── Status bar ──
 
@@ -236,8 +270,15 @@ export default function (pi: ExtensionAPI) {
   const pollInbox = async (ctx: ExtensionContext, silent = true) => {
     try {
       const result = await fetchInbox(creds, "unread", 50);
-      if (!result.ok) return;
+      if (!result.ok) {
+        consecutivePollFailures++;
+        if (consecutivePollFailures >= 3 && ctx.hasUI) {
+          ctx.ui.setStatus("email", ctx.ui.theme.fg("error", "✉ ERR"));
+        }
+        return;
+      }
 
+      consecutivePollFailures = 0;
       const newCount = result.pagination.total;
       const newIds = new Set(result.data.map((m) => m.id));
 
@@ -266,7 +307,10 @@ export default function (pi: ExtensionAPI) {
       lastSeenIds = newIds;
       updateStatus(ctx);
     } catch {
-      // Network error -- don't crash, try again next cycle
+      consecutivePollFailures++;
+      if (consecutivePollFailures >= 3 && ctx.hasUI) {
+        ctx.ui.setStatus("email", ctx.ui.theme.fg("error", "✉ ERR"));
+      }
     }
   };
 
