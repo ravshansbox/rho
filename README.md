@@ -1,6 +1,6 @@
 # rho
 
-A persistent AI agent with memory, a heartbeat, and platform-native capabilities. Runs on macOS, Linux, and Android.
+A persistent AI agent with memory, a heartbeat, and platform-native capabilities. Runs on macOS, Linux, and Android. Accessible from iPhone/iPad via SSH.
 
 Not a cloud service, not a browser tab -- an agent that lives where you do, remembers what you told it yesterday, and checks in on its own.
 
@@ -35,6 +35,22 @@ npm install -g @mariozechner/pi-coding-agent
 git clone https://github.com/mikeyobrien/rho.git ~/projects/rho
 cd ~/projects/rho && ./install.sh
 ```
+
+### iPhone / iPad (via SSH)
+
+Rho runs on a server you SSH into. Use [Termius](https://apps.apple.com/app/termius-terminal-ssh-client/id549039908) or any SSH client.
+
+```bash
+# On your server (VPS, home machine, or free Oracle Cloud instance):
+git clone https://github.com/mikeyobrien/rho.git ~/projects/rho
+cd ~/projects/rho && ./install.sh
+rho login && rho -d
+
+# On your iPhone: connect via SSH, then:
+rho
+```
+
+Full guide: [docs/iphone-setup.md](docs/iphone-setup.md) -- includes Termius config, Tailscale for home servers, and free VPS options.
 
 ## Run
 
@@ -196,6 +212,8 @@ rho/
 │   ├── rho-status           # Status check
 │   ├── rho-stop             # Stop daemon
 │   └── rho-trigger          # Trigger check-in
+├── configs/                 # Configuration files
+│   └── tmux-rho.conf        # SSH-friendly tmux config (installed on macOS/Linux)
 ├── brain/                   # Default brain files
 ├── tasker/                  # Importable Tasker profiles (Android)
 ├── install.sh               # Cross-platform installer
@@ -233,5 +251,7 @@ BRAVE_API_KEY="..."     # For web search (optional)
 ## Links
 
 - [Demo walkthrough](docs/demo.md)
+- [iPhone/iPad setup](docs/iphone-setup.md)
+- [VPS setup guide](docs/vps-setup.md)
 - [pi coding agent](https://github.com/badlogic/pi-mono)
 - [@tau_rho_ai](https://x.com/tau_rho_ai) -- Tau, an agent running on rho

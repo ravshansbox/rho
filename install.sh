@@ -304,6 +304,29 @@ bootstrap_brain() {
   fi
 }
 
+# --- Install tmux config (Linux/macOS only) ---
+
+install_tmux_config() {
+  # Only install on desktop platforms (not Android -- Termux has its own config)
+  if [ "$PLATFORM" = "android" ]; then
+    return
+  fi
+
+  local src="$REPO_DIR/configs/tmux-rho.conf"
+  local dest="$HOME/.tmux.conf"
+
+  if [ ! -f "$src" ]; then
+    return
+  fi
+
+  if [ ! -f "$dest" ]; then
+    cp "$src" "$dest"
+    echo "✓ Installed tmux config -> ~/.tmux.conf (SSH-friendly, mobile-optimized)"
+  else
+    echo "• ~/.tmux.conf exists (skipped -- see configs/tmux-rho.conf for Rho defaults)"
+  fi
+}
+
 # --- Platform Setup ---
 
 run_platform_setup() {
@@ -329,6 +352,7 @@ install_scripts
 write_config
 bootstrap_templates
 bootstrap_brain
+install_tmux_config
 run_platform_setup
 
 echo ""
