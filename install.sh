@@ -117,18 +117,13 @@ cleanup_old() {
     rm -f "$PI_DIR/skills"
   elif [ -d "$PI_DIR/skills" ]; then
     # New install: skills/ is a real dir with individual symlinks.
+    # Use find to catch broken symlinks too (glob */ skips them).
     # IMPORTANT: use -L check and rm -f (not rm -rf) for symlinks,
     # otherwise rm -rf follows the symlink and deletes actual repo files.
+    find "$PI_DIR/skills" -maxdepth 1 -type l -delete 2>/dev/null || true
     for entry in "$PI_DIR/skills"/*/; do
-      local name
-      name="${entry%/}"          # strip trailing slash from glob
-      name="$(basename "$name")"
-      local target="$PI_DIR/skills/$name"
-      if [ -L "$target" ]; then
-        rm -f "$target"
-      elif [ -d "$target" ]; then
-        rm -rf "$target"
-      fi
+      [ -d "$entry" ] || continue
+      rm -rf "$entry"
     done
   fi
 }
@@ -161,18 +156,20 @@ install_extensions() {
 install_skills() {
   mkdir -p "$PI_DIR/skills"
 
-  # Core skills
+  # Core skills (only dirs containing SKILL.md)
   for d in "$REPO_DIR/skills"/*/; do
     [ -d "$d" ] || continue
+    [ -f "${d}SKILL.md" ] || continue
     ln -sf "$d" "$PI_DIR/skills/$(basename "$d")"
   done
   echo "✓ Symlinked core skills"
 
-  # Platform skills
+  # Platform skills (only dirs containing SKILL.md)
   local plat_skills="$REPO_DIR/platforms/$PLATFORM/skills"
   if [ -d "$plat_skills" ]; then
     for d in "$plat_skills"/*/; do
       [ -d "$d" ] || continue
+      [ -f "${d}SKILL.md" ] || continue
       ln -sf "$d" "$PI_DIR/skills/$(basename "$d")"
     done
     echo "✓ Symlinked $PLATFORM skills"
