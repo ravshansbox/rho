@@ -11,10 +11,11 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { vaultDir } from "./workspace.ts";
 
 // ---- Constants ----
 
-export const VAULT_DIR = path.join(os.homedir(), ".rho", "vault");
+export const VAULT_DIR = vaultDir();
 
 export const VAULT_SUBDIRS = [
   "concepts",

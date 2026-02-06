@@ -29,6 +29,7 @@ import { Type } from "@sinclair/typebox";
 import { execSync } from "node:child_process";
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { rhoDir, stateFile, configFile, resultsDir } from "./workspace.ts";
 import { buildHeartbeatSection } from "./tasks-core.ts";
 
 // State stored in memory (reconstructed from session entries and persisted to disk)
@@ -66,12 +67,12 @@ const DEFAULT_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 const MIN_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes minimum
 const MAX_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours maximum
 
-const RHO_DIR = join(process.env.HOME || "", ".rho");
+const RHO_DIR = rhoDir();
 const LEGACY_STATE_PATH = join(process.env.HOME || "", ".pi", "agent", "rho-state.json");
-const STATE_PATH = join(RHO_DIR, "rho-state.json");
-const CONFIG_PATH = join(RHO_DIR, "config.json");
-const RESULTS_DIR = join(process.env.HOME || "", ".rho", "results");
-const HEARTBEAT_PROMPT_FILE = join(process.env.HOME || "", ".rho", "heartbeat-prompt.txt");
+const STATE_PATH = stateFile();
+const CONFIG_PATH = configFile();
+const RESULTS_DIR = resultsDir();
+const HEARTBEAT_PROMPT_FILE = join(RHO_DIR, "heartbeat-prompt.txt");
 const DEFAULT_SESSION_NAME = "rho";
 const HEARTBEAT_WINDOW_NAME = "heartbeat";
 const MAX_WINDOW_NAME = 50;

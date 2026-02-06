@@ -21,11 +21,11 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import * as crypto from "node:crypto";
+import { brainDir, configFile } from "./workspace.ts";
 
 // Paths — Rho owns ~/.rho/, pi owns ~/.pi/
 // Brain data lives under ~/.rho/brain/ (migrated from ~/.pi/brain/)
-const RHO_DIR = path.join(os.homedir(), ".rho");
-const BRAIN_DIR = path.join(RHO_DIR, "brain");
+const BRAIN_DIR = brainDir();
 const LEGACY_BRAIN_DIR = path.join(os.homedir(), ".pi", "brain");
 const CORE_FILE = path.join(BRAIN_DIR, "core.jsonl");
 const MEMORY_FILE = path.join(BRAIN_DIR, "memory.jsonl");
@@ -37,7 +37,7 @@ const DAILY_MEMORY_DIR = path.join(BRAIN_DIR, "memory");
 // - Disabled for subagent/heartbeat sessions (RHO_SUBAGENT=1)
 // - Can be overridden via env var RHO_AUTO_MEMORY=0|1
 // - Persisted toggle via ~/.rho/config.json { "autoMemory": true|false }
-const RHO_CONFIG_PATH = path.join(RHO_DIR, "config.json");
+const RHO_CONFIG_PATH = configFile();
 
 type RhoConfig = {
   autoMemory?: boolean;

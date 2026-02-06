@@ -8,6 +8,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { randomBytes } from "node:crypto";
+import { rhoDir, tasksFile } from "./workspace.ts";
 
 // ---- Types ----
 
@@ -42,8 +43,8 @@ export interface TaskResult {
 
 // ---- Constants ----
 
-export const RHO_DIR = join(process.env.HOME || "", ".rho");
-export const TASKS_PATH = join(RHO_DIR, "tasks.jsonl");
+export const RHO_DIR = rhoDir();
+export const TASKS_PATH = tasksFile();
 
 const PRIORITY_ORDER: Record<TaskPriority, number> = {
   urgent: 0,
