@@ -119,6 +119,7 @@ Or use the `/email` command once registered:
 |-----------|-----------|-------------|
 | `rho/` | All | Heartbeat, memory, tasks, and vault tooling |
 | `brave-search/` | All | Web search via Brave API |
+| `x-search/` | All | X (Twitter) search via xAI Grok (`x_search`) |
 | `memory-viewer/` | All | Browse and search memories |
 | `usage-bars/` | All | Token/cost usage display |
 | `moltbook-viewer/` | All | Moltbook post viewer |
