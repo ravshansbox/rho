@@ -2086,6 +2086,15 @@ export default function (pi: ExtensionAPI) {
     if (heartbeatMd) fullPrompt += `\n\n---\n\nHEARTBEAT.md content:\n${heartbeatMd}`;
     if (tasksSection) fullPrompt += `\n\n---\n\n${tasksSection}`;
 
+    // Include identity context so heartbeat agent has personality/voice guidance
+    const agentsMdContent = readMarkdownFile([path.join(RHO_DIR, "AGENTS.md")]);
+    const soulMdContent = readMarkdownFile([path.join(RHO_DIR, "SOUL.md")]);
+    if (agentsMdContent || soulMdContent) {
+      fullPrompt += "\n\n---\n\nIdentity context:";
+      if (agentsMdContent) fullPrompt += "\n\n" + agentsMdContent;
+      if (soulMdContent) fullPrompt += "\n\n" + soulMdContent;
+    }
+
     buildModelFlags(ctx).then((modelFlags) => {
       const sentToTmux = runHeartbeatInTmux(fullPrompt, modelFlags || undefined);
       if (!sentToTmux) pi.sendUserMessage(fullPrompt, { deliverAs: "followUp" });
