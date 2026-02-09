@@ -608,6 +608,7 @@ async function runAutoMemoryExtraction(
   let remaining = maxItems;
   let storedLearnings = 0;
   let storedPrefs = 0;
+  const storedItems: string[] = [];
 
   for (const text of extractedLearnings) {
     if (remaining <= 0) break;
@@ -615,6 +616,7 @@ async function runAutoMemoryExtraction(
     if (result.stored) {
       storedLearnings += 1;
       remaining -= 1;
+      storedItems.push(text);
     }
   }
 
@@ -624,11 +626,26 @@ async function runAutoMemoryExtraction(
     if (result.stored) {
       storedPrefs += 1;
       remaining -= 1;
+      storedItems.push(`[${pref.category}] ${pref.text}`);
     }
   }
 
   if ((storedLearnings > 0 || storedPrefs > 0) && ctx.hasUI) {
-    ctx.ui.notify(`Auto-memory stored: ${storedLearnings}L ${storedPrefs}P`, "info");
+    const total = storedLearnings + storedPrefs;
+    const prefix = `Auto-memory (${total}): `;
+    const maxLen = 120 - prefix.length;
+    const truncated: string[] = [];
+    let len = 0;
+    for (const item of storedItems) {
+      const short = item.length > 60 ? item.slice(0, 57) + "..." : item;
+      const quoted = `"${short}"`;
+      const added = len === 0 ? quoted.length : quoted.length + 3; // " | " separator
+      if (len + added > maxLen && truncated.length > 0) break;
+      truncated.push(quoted);
+      len += added;
+    }
+    const suffix = truncated.length < storedItems.length ? ` +${storedItems.length - truncated.length} more` : "";
+    ctx.ui.notify(`${prefix}${truncated.join(" | ")}${suffix}`, "info");
   }
 
   return { storedLearnings, storedPrefs };
