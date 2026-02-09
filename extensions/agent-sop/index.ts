@@ -19,6 +19,48 @@ import { parseSOP, formatParameterSummary, formatStepOutline, type SOP } from ".
 // Resolve the bundled sops/ dir relative to this extension
 const BUNDLED_SOP_DIR = path.resolve(import.meta.dirname ?? __dirname, "../../sops");
 
+// ─── Parameter Resolution ───────────────────────────────────────────────────
+
+/** Escape special regex metacharacters in a string. */
+export function escapeRegExp(s: string): string {
+	return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Resolve cross-references between parameter values.
+ * e.g., if project_dir = ".agents/{project_name}" and project_name = "foo",
+ * project_dir resolves to ".agents/foo".
+ *
+ * Multi-pass: handles transitive refs (A → B → C). Caps at MAX_PASSES to
+ * avoid infinite loops on circular references.
+ */
+export function resolveParamValues(params: Record<string, string>): Record<string, string> {
+	const resolved = { ...params };
+	const paramNames = Object.keys(resolved);
+	const MAX_PASSES = 5;
+
+	for (let pass = 0; pass < MAX_PASSES; pass++) {
+		let changed = false;
+		for (const key of paramNames) {
+			let newValue = resolved[key];
+			for (const name of paramNames) {
+				if (name === key) continue;
+				newValue = newValue.replace(
+					new RegExp(`\\{${escapeRegExp(name)}\\}`, "g"),
+					resolved[name],
+				);
+			}
+			if (newValue !== resolved[key]) {
+				resolved[key] = newValue;
+				changed = true;
+			}
+		}
+		if (!changed) break;
+	}
+
+	return resolved;
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function discoverSOPs(dirs: string[]): Map<string, SOP> {
@@ -111,11 +153,8 @@ export default function agentSOPExtension(pi: ExtensionAPI) {
 				: `${param.name} (optional)`;
 			const placeholder = param.defaultValue ?? "";
 
-			if (param.name === "mode") {
-				const choice = await ctx.ui.select(`${param.name}:`, [
-					"interactive",
-					"auto",
-				]);
+			if (param.options && param.options.length > 0) {
+				const choice = await ctx.ui.select(`${param.name}:`, param.options);
 				if (choice === undefined) return null;
 				params[param.name] = choice;
 				continue;
@@ -166,11 +205,12 @@ export default function agentSOPExtension(pi: ExtensionAPI) {
 			}
 		}
 
+		const resolved = resolveParamValues(params);
 		let sopContent = sop.rawContent;
-		for (const [key, value] of Object.entries(params)) {
+		for (const [key, value] of Object.entries(resolved)) {
 			sopContent = sopContent.replace(
-				new RegExp(`\\{${key}\\}`, "g"),
-				value,
+				new RegExp(`\\{${escapeRegExp(key)}\\}`, "g"),
+				() => value,
 			);
 		}
 

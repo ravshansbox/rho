@@ -13,6 +13,7 @@ export interface SOPParameter {
 	required: boolean;
 	defaultValue?: string;
 	description: string;
+	options?: string[];
 }
 
 export interface SOPConstraint {
@@ -226,7 +227,17 @@ export function parseSOP(content: string, filePath: string): SOP {
 				break;
 			case "parameters": {
 				const param = parseParameterLine(line.trim());
-				if (param) parameters.push(param);
+				if (param) {
+					parameters.push(param);
+				} else if (parameters.length > 0) {
+					// Check for indented option line:  - "value": description  OR  - "value"
+					const optMatch = line.match(/^\s+-\s+"([^"]+)"(?:\s*:\s*(.+))?$/);
+					if (optMatch) {
+						const lastParam = parameters[parameters.length - 1];
+						if (!lastParam.options) lastParam.options = [];
+						lastParam.options.push(optMatch[1]);
+					}
+				}
 				break;
 			}
 			case "steps":
