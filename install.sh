@@ -47,8 +47,8 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)"
 
 detect_mode() {
-  # Dev mode: script is inside a git checkout with our package.json
-  if [ -d "$SCRIPT_DIR/.git" ] && [ -f "$SCRIPT_DIR/package.json" ]; then
+  # Dev mode: script lives alongside our package.json (git checkout or extracted archive)
+  if [ -f "$SCRIPT_DIR/package.json" ]; then
     if grep -q '"@rhobot-dev/rho"' "$SCRIPT_DIR/package.json" 2>/dev/null; then
       MODE="dev"
       REPO_DIR="$SCRIPT_DIR"
