@@ -669,6 +669,42 @@ function removeMemoryEntry(id: string): { ok: boolean; message: string } {
   return { ok: true, message: `Removed [${id}]: ${text}` };
 }
 
+// ─── Brain: Archive Stale Memories ────────────────────────────────────────────
+
+function archiveStaleMemories(maxAgeDays: number = 90): { archived: number } {
+  const entries = readJsonl<Entry>(MEMORY_FILE);
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - maxAgeDays);
+  const cutoffStr = cutoff.toISOString().split("T")[0];
+
+  const keep: Entry[] = [];
+  let archived = 0;
+
+  for (const e of entries) {
+    if (e.type === "learning") {
+      const l = e as LearningEntry;
+      // Keep if used recently or used frequently
+      if (l.last_used >= cutoffStr || l.used >= 3) {
+        keep.push(e);
+        continue;
+      }
+      // Archive stale, unused entries
+      appendJsonl(ARCHIVE_FILE, { ...e, archived: today(), reason: "decay" });
+      archived++;
+    } else if (e.type === "preference") {
+      // Preferences don't decay — they're explicit user choices
+      keep.push(e);
+    } else {
+      keep.push(e);
+    }
+  }
+
+  if (archived > 0) {
+    writeJsonl(MEMORY_FILE, keep);
+  }
+  return { archived };
+}
+
 // ─── Brain: Legacy Migration ──────────────────────────────────────────────────
 
 function migrateLegacyBrain(): void {
@@ -2253,9 +2289,9 @@ export default function (pi: ExtensionAPI) {
     description:
       "Store learnings (corrections, patterns, conventions) or preferences (user likes/dislikes with category). " +
       "Use after user corrections or when discovering something future sessions need. " +
-      "Actions: add_learning, add_preference, reinforce, remove (by ID), search, list.",
+      "Actions: add_learning, add_preference, reinforce, remove (by ID), search, list, decay (archive stale entries).",
     parameters: Type.Object({
-      action: StringEnum(["add_learning", "add_preference", "reinforce", "remove", "search", "list"] as const),
+      action: StringEnum(["add_learning", "add_preference", "reinforce", "remove", "search", "list", "decay"] as const),
       content: Type.Optional(Type.String({ description: "Concise, actionable text" })),
       category: Type.Optional(Type.String({ description: "Category: Communication, Code, Tools, Workflow, General" })),
       query: Type.Optional(Type.String({ description: "Search query" })),
@@ -2351,6 +2387,11 @@ export default function (pi: ExtensionAPI) {
           if (!params.id) return { content: [{ type: "text", text: "Error: id required" }], details: { error: true } };
           const result = removeMemoryEntry(params.id);
           return { content: [{ type: "text", text: result.message }], details: { ok: result.ok } };
+        }
+
+        case "decay": {
+          const result = archiveStaleMemories();
+          return { content: [{ type: "text", text: result.archived > 0 ? `Archived ${result.archived} stale entries` : "No stale entries to archive" }], details: { archived: result.archived } };
         }
 
         default:
