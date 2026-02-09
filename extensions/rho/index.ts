@@ -1155,7 +1155,7 @@ export function writeNote(
 export function validateNote(content: string, type: string): ValidationResult {
   const fm = parseFrontmatter(content);
   if (!fm.type) {
-    return { valid: false, reason: "Missing frontmatter: note must have --- delimited frontmatter with at least a 'type' field." };
+    return { valid: false, reason: "Missing frontmatter. Expected format:\n---\ntype: concept\ncreated: YYYY-MM-DD\nupdated: YYYY-MM-DD\ntags: []\n---" };
   }
 
   if (type === "log") return { valid: true };
@@ -1163,12 +1163,12 @@ export function validateNote(content: string, type: string): ValidationResult {
   if (TYPES_REQUIRING_CONNECTIONS.has(type)) {
     const hasConnections = /^##\s+Connections/m.test(content);
     if (!hasConnections) {
-      return { valid: false, reason: "Missing '## Connections' section. Non-log notes must have a Connections section with wikilinks." };
+      return { valid: false, reason: "Missing '## Connections' section with [[wikilinks]]. Add:\n\n## Connections\n\n- [[related-note]]" };
     }
 
     const links = extractWikilinks(content);
     if (links.length === 0) {
-      return { valid: false, reason: "No wikilinks found. Notes must have at least 1 [[wikilink]] to connect to the knowledge graph." };
+      return { valid: false, reason: "No [[wikilinks]] found in Connections section. Add at least one: [[note-slug]]" };
     }
   }
 
