@@ -39,6 +39,7 @@ export interface StatusInfo {
   config: RhoConfig | null;
   heartbeat: HeartbeatState | null;
   paneOutput: string | null;
+  tmuxSocket?: string;
 }
 
 export interface NotificationArgs {
@@ -179,6 +180,10 @@ export function formatStatus(info: StatusInfo): string {
   }
 
   lines.push(hbLine);
+
+  if (info.state.tmuxRunning && info.tmuxSocket) {
+    lines.push(`Session:   tmux -L ${info.tmuxSocket} attach -t ${SESSION_NAME}`);
+  }
 
   if (!info.state.tmuxRunning) {
     if (!info.config) {

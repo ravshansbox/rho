@@ -177,6 +177,7 @@ Options:
     config,
     heartbeat: readHeartbeatState(),
     paneOutput: state.tmuxRunning ? capturePaneOutput() : null,
+    tmuxSocket: getTmuxSocket(),
   };
 
   if (jsonMode) {
