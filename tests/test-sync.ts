@@ -200,7 +200,7 @@ console.log("\n-- buildRhoPackageEntry: all non-core modules disabled --");
   const config = makeConfig({
     modules: {
       knowledge: { vault: false },
-      tools: { "brave-search": false, "x-search": false, email: false },
+      tools: { "brave-search": false, "x-search": false, email: false, "agent-sop": false },
       skills: { "session-search": false, "update-pi": false, "rho-onboard": false },
       ui: { "usage-bars": false, moltbook: false },
     },
@@ -211,9 +211,9 @@ console.log("\n-- buildRhoPackageEntry: all non-core modules disabled --");
   assert(entry.extensions !== undefined, "extensions array present");
   assertIncludes(entry.extensions!, "extensions/**/*.ts", "includes extension entrypoints");
 
-  // Count: vault-search, brave-search, x-search, email, usage-bars, moltbook-viewer = 6 exclusions
+  // Count: vault-search, brave-search, x-search, email, agent-sop, usage-bars, moltbook-viewer = 7 exclusions
   const extExclusions = entry.extensions!.filter((p) => p.startsWith("!"));
-  assertEq(extExclusions.length, 6, "6 extension exclusions");
+  assertEq(extExclusions.length, 7, "7 extension exclusions");
 
   assert(entry.skills !== undefined, "skills array present");
   // Count: vault-clean, rho-cloud-email, rho-cloud-onboard, session-search, update-pi, rho-onboard = 6 exclusions

@@ -87,6 +87,14 @@ export const REGISTRY: Record<string, ModuleEntry> = {
     description: "Mine sessions to learn about the user and evolve SOUL.md over time",
   },
 
+  // ── Workflows ──────────────────────────────────────────
+  "agent-sop": {
+    category: "tools",
+    extensions: ["extensions/agent-sop"],
+    skills: [],
+    description: "Standard Operating Procedures for structured agent workflows",
+  },
+
   // ── UI ────────────────────────────────────────────────
   "usage-bars": {
     category: "ui",
