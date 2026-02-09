@@ -73,7 +73,7 @@ console.log("-- --help --");
   const r = run("--help");
   assert(r.code === 0, "--help exits 0");
   assertIncludes(r.stdout, "rho", "--help mentions rho");
-  for (const cmd of ["init", "sync", "doctor", "upgrade", "start", "stop", "status", "trigger", "login"]) {
+  for (const cmd of ["init", "sync", "doctor", "upgrade", "start", "stop", "status", "trigger", "logs", "login"]) {
     assertIncludes(r.stdout, cmd, `--help lists ${cmd}`);
   }
 }
@@ -108,7 +108,7 @@ console.log("\n-- unknown command --");
 // -- each command supports --help without routing failure --
 console.log("\n-- subcommand --help --");
 {
-  for (const cmd of ["init", "sync", "doctor", "upgrade", "start", "stop", "status", "trigger", "login"]) {
+  for (const cmd of ["init", "sync", "doctor", "upgrade", "start", "stop", "status", "trigger", "logs", "login"]) {
     const r = run(`${cmd} --help`);
     assertNotIncludes(r.stderr, "Unknown command", `${cmd} --help routes`);
   }

@@ -32,6 +32,7 @@ const COMMANDS: Record<string, CommandDef> = {
   stop:    { description: "Stop the heartbeat daemon",                  load: () => import("./commands/stop.ts") },
   status:  { description: "Show daemon and module status",              load: () => import("./commands/status.ts") },
   trigger: { description: "Force an immediate heartbeat check-in",      load: () => import("./commands/trigger.ts") },
+  logs:    { description: "Show recent heartbeat output",               load: () => import("./commands/logs.ts") },
   login:   { description: "Authenticate with pi providers",            load: () => import("./commands/login.ts") },
 };
 
@@ -43,7 +44,9 @@ function printHelp(): void {
 
   console.log(`rho v${VERSION} - AI agent framework
 
-Usage: rho <command> [options]
+Usage: rho [command] [options]
+
+Running \`rho\` with no arguments starts the daemon (if needed) and attaches.
 
 Commands:
 ${lines.join("\n")}
@@ -64,7 +67,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (args.length === 0 || args.includes("--help") || args.includes("-h")) {
+  if (args.includes("--help") || args.includes("-h")) {
     // If --help is combined with a command, let the command handle it
     const cmdName = args.find((a) => !a.startsWith("-"));
     if (cmdName && COMMANDS[cmdName]) {
@@ -73,6 +76,13 @@ async function main(): Promise<void> {
       return;
     }
     printHelp();
+    return;
+  }
+
+  // Bare `rho` with no args: start daemon if needed, attach foreground
+  if (args.length === 0) {
+    const cmd = await COMMANDS["start"].load();
+    await cmd.run(["--foreground"]);
     return;
   }
 
