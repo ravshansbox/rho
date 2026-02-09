@@ -47,7 +47,7 @@ function readJsonl<T>(path: string): T[] {
 }
 
 function buildMarkdown(): string {
-	const brainDir = join(homedir(), ".pi", "brain");
+	const brainDir = join(homedir(), ".rho", "brain");
 
 	// Read all sources
 	const behaviors = readJsonl<BehaviorEntry>(join(brainDir, "core.jsonl"));
