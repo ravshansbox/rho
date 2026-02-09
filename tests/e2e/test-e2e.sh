@@ -65,7 +65,7 @@ assert_not_empty() {
   fi
 }
 
-REPO_DIR="$HOME/.rho/project"
+REPO_DIR="${REPO_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
 RHO_DIR="$HOME/.rho"
 PI_DIR="$HOME/.pi/agent"
 

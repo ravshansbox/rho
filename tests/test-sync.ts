@@ -3,6 +3,8 @@
  * Run: npx tsx tests/test-sync.ts
  */
 
+import path from "node:path";
+
 // ---- Test harness ----
 let PASS = 0;
 let FAIL = 0;
@@ -91,7 +93,7 @@ function makeEmptyPackages(): PackagesConfig {
   return { packages: [] };
 }
 
-const RHO_ROOT = "/data/data/com.termux/files/home/.rho/project";
+const RHO_ROOT = path.resolve(import.meta.dirname ?? ".", "..");
 
 // ================================================================
 // buildRhoPackageEntry

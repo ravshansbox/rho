@@ -7,7 +7,7 @@ description: "Install and configure Rho from scratch (Doom-style init.toml + syn
 
 ## Overview
 
-This SOP installs **pi**, installs **rho**, generates a starter config in `~/.rho/`, syncs it into pi (`settings.json` filtering), and verifies the setup with `rho doctor`.
+This SOP installs **pi**, installs **rho** via npm, generates a starter config in `~/.rho/`, syncs it into pi (`settings.json` filtering), and verifies the setup with `rho doctor`.
 
 ## Parameters
 
@@ -29,7 +29,6 @@ printf "SHELL=%s\n" "$SHELL"
 command -v node >/dev/null && node -v || echo "node: missing"
 command -v npm  >/dev/null && npm -v  || echo "npm: missing"
 command -v tmux >/dev/null && tmux -V || echo "tmux: missing"
-command -v git  >/dev/null && git --version || echo "git: missing"
 command -v pi   >/dev/null && pi --version || echo "pi: missing"
 command -v rho  >/dev/null && rho --version || echo "rho: missing"
 ```
@@ -37,28 +36,28 @@ command -v rho  >/dev/null && rho --version || echo "rho: missing"
 ### 2. Install system dependencies
 
 **Constraints:**
-- You MUST ensure: Node.js >= 20, npm, tmux, git.
+- You MUST ensure: Node.js >= 20, npm, tmux.
 - On Android/Termux you SHOULD install via `pkg` (because it is the standard package manager).
 
 #### Android / Termux
 
 ```bash
 pkg update -y
-pkg install -y nodejs-lts tmux git
+pkg install -y nodejs-lts tmux
 ```
 
 #### macOS
 
 ```bash
 # Requires Homebrew
-brew install node tmux git
+brew install node tmux
 ```
 
 #### Linux (Debian/Ubuntu)
 
 ```bash
 sudo apt update
-sudo apt install -y nodejs npm tmux git
+sudo apt install -y nodejs npm tmux
 ```
 
 ### 3. Install pi
@@ -74,22 +73,10 @@ pi --version
 ### 4. Install rho
 
 **Constraints:**
-- You MUST prefer `npm install -g @rhobot-dev/rho` if it works.
-- You MAY install from git as a fallback.
-
-#### Preferred (npm)
+- You MUST install via npm.
 
 ```bash
 npm install -g @rhobot-dev/rho
-rho --version
-```
-
-#### Fallback (git clone + install-from-path)
-
-```bash
-mkdir -p ~/projects
-[ -d ~/.rho/project/.git ] || git clone https://github.com/mikeyobrien/rho.git ~/.rho/project
-npm install -g ~/.rho/project
 rho --version
 ```
 
@@ -104,7 +91,7 @@ rho init --name "${AGENT_NAME:-rho}"
 
 Then set heartbeat interval in `~/.rho/init.toml`:
 - Find `[settings.heartbeat]`
-- Set `interval = "30m"` (or the user’s requested value)
+- Set `interval = "30m"` (or the user's requested value)
 
 ### 6. Sync config into pi
 
@@ -145,4 +132,4 @@ If the user is unfamiliar with tmux, explain only the essentials:
 
 - **`rho sync` says pi is missing**: run `npm install -g @mariozechner/pi-coding-agent`.
 - **`rho doctor` shows settings.json out of sync**: run `rho sync`.
-- **tmux missing**: install tmux with your platform’s package manager.
+- **tmux missing**: install tmux with your platform's package manager.

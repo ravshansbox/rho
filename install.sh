@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
-# Rho — Cross-platform install script
-# Detects OS, checks dependencies, symlinks core + platform files,
-# writes config, and bootstraps templates.
+# Rho — Developer install script (for local repo checkouts)
+#
+# End users: install via npm instead:
+#   npm install -g @rhobot-dev/rho
+#   rho init && rho sync
+#
+# This script is for developers who cloned the repo. It symlinks the
+# rho CLI from this checkout, installs deps, and runs rho init + sync.
+# Works from any directory -- no hardcoded paths.
 #
 # Usage: ./install.sh [--force]
 #   --force: overwrite existing AGENTS.md

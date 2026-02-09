@@ -1462,8 +1462,18 @@ function createExclusiveTextFile(filePath: string, content: string): { ok: boole
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     tmpPath = `${filePath}.tmp-create-${process.pid}-${nanoid(4)}`;
     fs.writeFileSync(tmpPath, content, { encoding: "utf-8", mode: 0o600 });
-    fs.linkSync(tmpPath, filePath); // atomic, fails with EEXIST if lock already present
-    fs.unlinkSync(tmpPath);
+    try {
+      fs.linkSync(tmpPath, filePath); // atomic, fails with EEXIST if lock already present
+    } catch (linkErr) {
+      const linkCode = (linkErr as NodeJS.ErrnoException | undefined)?.code;
+      if (linkCode === "EEXIST") throw linkErr; // re-throw: another process holds the lock
+      // Hard links unsupported (EPERM on Android/Termux, ENOSYS, EXDEV, etc.)
+      // Fall back to O_CREAT|O_EXCL which is also atomic for creation.
+      const fd = fs.openSync(filePath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
+      fs.writeSync(fd, content);
+      fs.closeSync(fd);
+    }
+    try { if (tmpPath) fs.unlinkSync(tmpPath); } catch { /* ignore */ }
     tmpPath = null;
     return { ok: true };
   } catch (err) {

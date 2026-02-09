@@ -36,10 +36,10 @@ ENV HOME="/home/tester"
 # Suppress Node experimental warnings in test output
 ENV NODE_NO_WARNINGS=1
 
-# Copy the repo
+# Copy the repo (simulates a developer checkout; path is arbitrary)
 USER root
-COPY --chown=tester:tester . /home/tester/.rho/project
+COPY --chown=tester:tester . /home/tester/rho
 USER tester
 
 # Run the e2e test script
-CMD ["bash", "/home/tester/.rho/project/tests/e2e/test-e2e.sh"]
+CMD ["bash", "/home/tester/rho/tests/e2e/test-e2e.sh"]

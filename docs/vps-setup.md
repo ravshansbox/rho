@@ -21,11 +21,11 @@ SSH in and install:
 ssh ubuntu@<your-ip>
 
 # Install dependencies
-sudo apt update && sudo apt install -y nodejs npm tmux git
+sudo apt update && sudo apt install -y nodejs npm tmux
 
 # Install Rho
-git clone https://github.com/mikeyobrien/rho.git ~/.rho/project
-cd ~/.rho/project && ./install.sh
+npm install -g @mariozechner/pi-coding-agent @rhobot-dev/rho
+rho init && rho sync
 rho login
 rho start   # start in background
 ```

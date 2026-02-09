@@ -16,9 +16,6 @@ ok()    { echo -e "${GREEN}ok${NC} $1"; }
 warn()  { echo -e "${YELLOW}!!${NC} $1"; }
 fail()  { echo -e "${RED}error${NC} $1"; exit 1; }
 
-RHO_DIR="${RHO_DIR:-$HOME/.rho/project}"
-REPO_URL="https://github.com/mikeyobrien/rho.git"
-
 # ── Detect Platform ───────────────────────────────────────
 
 detect_platform() {
@@ -70,7 +67,6 @@ install_macos() {
   command -v node &>/dev/null  || missing+=("node")
   command -v npm &>/dev/null   || missing+=("npm")
   command -v tmux &>/dev/null  || missing+=("tmux")
-  command -v git &>/dev/null   || missing+=("git")
 
   if [ ${#missing[@]} -gt 0 ]; then
     warn "Missing: ${missing[*]}"
@@ -85,11 +81,11 @@ install_macos() {
     else
       echo ""
       echo "  Install Homebrew: https://brew.sh"
-      echo "  Then: brew install node tmux git"
+      echo "  Then: brew install node tmux"
       fail "Missing dependencies"
     fi
   fi
-  ok "node $(node --version), tmux, git"
+  ok "node $(node --version), tmux"
 }
 
 # ── Linux ──────────────────────────────────────────────────
@@ -100,24 +96,23 @@ install_linux() {
   command -v node &>/dev/null  || missing+=("node")
   command -v npm &>/dev/null   || missing+=("npm")
   command -v tmux &>/dev/null  || missing+=("tmux")
-  command -v git &>/dev/null   || missing+=("git")
 
   if [ ${#missing[@]} -gt 0 ]; then
     warn "Missing: ${missing[*]}"
     echo ""
     if command -v apt &>/dev/null; then
-      echo "  sudo apt update && sudo apt install -y nodejs npm tmux git"
+      echo "  sudo apt update && sudo apt install -y nodejs npm tmux"
     elif command -v pacman &>/dev/null; then
-      echo "  sudo pacman -S nodejs npm tmux git"
+      echo "  sudo pacman -S nodejs npm tmux"
     elif command -v dnf &>/dev/null; then
-      echo "  sudo dnf install nodejs npm tmux git"
+      echo "  sudo dnf install nodejs npm tmux"
     else
-      echo "  Install node (18+), npm, tmux, and git using your package manager"
+      echo "  Install node (18+), npm, and tmux using your package manager"
     fi
     echo ""
     fail "Install missing dependencies and re-run"
   fi
-  ok "node $(node --version), tmux, git"
+  ok "node $(node --version), tmux"
 }
 
 # ── Pi coding agent ────────────────────────────────────────
@@ -132,27 +127,28 @@ install_pi() {
   fi
 }
 
-# ── Clone/update repo ─────────────────────────────────────
+# ── Install rho ────────────────────────────────────────────
 
-clone_repo() {
-  if [ -d "$RHO_DIR/.git" ]; then
-    ok "rho repo exists at $RHO_DIR"
-    info "Pulling latest..."
-    cd "$RHO_DIR" && git pull --ff-only 2>/dev/null || true
+install_rho() {
+  if command -v rho &>/dev/null; then
+    local current
+    current=$(rho --version 2>/dev/null || echo "unknown")
+    ok "rho already installed ($current)"
+    info "Upgrading to latest..."
+    npm install -g @rhobot-dev/rho
   else
-    info "Cloning rho..."
-    mkdir -p "$(dirname "$RHO_DIR")"
-    git clone "$REPO_URL" "$RHO_DIR"
-    ok "Cloned to $RHO_DIR"
+    info "Installing rho..."
+    npm install -g @rhobot-dev/rho
+    ok "rho installed"
   fi
 }
 
-# ── Run install.sh ─────────────────────────────────────────
+# ── Initialize ─────────────────────────────────────────────
 
-run_install() {
-  info "Running rho install..."
-  cd "$RHO_DIR"
-  bash install.sh
+init_rho() {
+  info "Initializing rho..."
+  rho init --name rho
+  rho sync
 }
 
 # ── Done ───────────────────────────────────────────────────
@@ -197,6 +193,6 @@ case "$PLATFORM" in
 esac
 
 install_pi
-clone_repo
-run_install
+install_rho
+init_rho
 show_done
