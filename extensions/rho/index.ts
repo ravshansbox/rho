@@ -1585,6 +1585,16 @@ export default function (pi: ExtensionAPI) {
 
   // ── Bootstrap ──────────────────────────────────────────────────────────────
 
+  // Listen for usage-bars updates (extensions/usage-bars emits these)
+  const unsubscribeUsage = pi.events.on("usage:update", (data: any) => {
+    if (!data || typeof data !== "object") return;
+    const session = (data as any).session;
+    const weekly = (data as any).weekly;
+    if (typeof session !== "number" || typeof weekly !== "number") return;
+    usageBars = { session, weekly };
+    footerTui?.requestRender?.();
+  });
+
   migrateLegacyBrain();
   bootstrapBrainDefaults(__dirname);
   ensureVaultDirs();
@@ -1629,6 +1639,60 @@ export default function (pi: ExtensionAPI) {
   let hbTriggerSeenMtimeMs = 0;
   let hbLastSettingsFingerprint: string | null = null;
   let hbExitHandlersInstalled = false;
+
+  // ── Footer: usage + rho status on second line ─────────────────────────────
+
+  const CUSTOM_FOOTER_ENABLED = process.env.RHO_FOOTER !== "0";
+  let footerTui: any | null = null;
+  let usageBars: { session: number; weekly: number } | null = null;
+
+  const formatUsageBars = (): string => {
+    if (!usageBars) return "";
+    const s = Math.round(usageBars.session);
+    const w = Math.round(usageBars.weekly);
+    return `5h:${s}% 7d:${w}%`;
+  };
+
+  const formatRhoRole = (): string => {
+    if (!hbState.enabled || hbState.intervalMs === 0) return "ρ off";
+    return hbIsLeader ? "ρ lead" : "ρ follow";
+  };
+
+  const setRhoFooter = (ctx: ExtensionContext): void => {
+    if (!CUSTOM_FOOTER_ENABLED) return;
+    if (!ctx.hasUI) return;
+
+    ctx.ui.setFooter((tui, theme) => {
+      footerTui = tui;
+      return {
+        invalidate() {},
+        render(width: number): string[] {
+          const cwdPlain = formatPathForHeader(ctx.cwd, width);
+          const line1 = theme.fg("dim", truncateToWidth(cwdPlain, width));
+
+          const cu = ctx.getContextUsage();
+          const pct = cu ? Math.round(cu.percent) : null;
+          const pctPlain = pct === null ? "--%" : `${pct}%`;
+
+          let left = pctPlain;
+          if (pct !== null) {
+            if (pct > 90) left = theme.fg("error", pctPlain);
+            else if (pct > 70) left = theme.fg("warning", pctPlain);
+          }
+
+          const usage = formatUsageBars();
+          const rhoRole = formatRhoRole();
+          const rightPlain = [usage, rhoRole].filter(Boolean).join("  ");
+          const right = theme.fg("dim", rightPlain);
+
+          const spaces = Math.max(1, width - visibleWidth(left) - visibleWidth(right));
+          const line2 = truncateToWidth(left + " ".repeat(spaces) + right, width);
+
+          return [line1, line2];
+        },
+      };
+    });
+  };
 
   const heartbeatSettingsFingerprint = (): string => {
     return JSON.stringify({ enabled: hbState.enabled, intervalMs: hbState.intervalMs, heartbeatModel: hbState.heartbeatModel });
@@ -2020,7 +2084,10 @@ export default function (pi: ExtensionAPI) {
   // ── Event Handlers ─────────────────────────────────────────────────────────
 
   pi.on("session_start", async (_event, ctx) => {
-    if (!IS_SUBAGENT) setRhoHeader(ctx);
+    if (!IS_SUBAGENT) {
+      setRhoHeader(ctx);
+      setRhoFooter(ctx);
+    }
 
     // Cache context for system prompt
     //
@@ -2118,6 +2185,7 @@ export default function (pi: ExtensionAPI) {
   if (!IS_SUBAGENT) {
     pi.on("session_switch", async (_event, ctx) => {
       setRhoHeader(ctx);
+      setRhoFooter(ctx);
       startHeartbeatLeadership(ctx);
       loadHbState();
       reconstructHbState(ctx);
@@ -2127,6 +2195,7 @@ export default function (pi: ExtensionAPI) {
 
     pi.on("session_fork", async (_event, ctx) => {
       setRhoHeader(ctx);
+      setRhoFooter(ctx);
       startHeartbeatLeadership(ctx);
       loadHbState();
       reconstructHbState(ctx);
@@ -2135,6 +2204,10 @@ export default function (pi: ExtensionAPI) {
     });
 
     pi.on("session_shutdown", async () => {
+      unsubscribeUsage();
+      footerTui = null;
+      usageBars = null;
+
       if (hbTimer) { clearTimeout(hbTimer); hbTimer = null; }
       if (hbStatusTimer) { clearInterval(hbStatusTimer); hbStatusTimer = null; }
       if (hbLeadershipTimer) { clearInterval(hbLeadershipTimer); hbLeadershipTimer = null; }
