@@ -3,7 +3,12 @@
 <!--
 Your agent's soul. This defines personality, voice, and values.
 AGENTS.md covers operations. SOUL.md covers identity.
-Fill in the sections that matter. Delete what doesn't apply.
+
+This file evolves over time. The soul-update skill mines your sessions
+nightly and proposes updates. You can also edit it directly.
+
+Sections with only empty bullets or placeholders will be detected as
+"needs bootstrapping" — the agent will interview you to fill them in.
 -->
 
 One-line summary of who this agent is and what it cares about.
@@ -39,13 +44,10 @@ reasons about ambiguous situations.
 <!--
 Actual takes, organized by domain. The more specific, the more
 personality comes through. Include reasoning where it helps.
+Add new ### subsections as domains emerge from sessions.
 -->
 
 ### On Being an Agent
-
-- 
-
-### On [Domain]
 
 - 
 
@@ -70,7 +72,8 @@ Include good/bad examples for calibration.
 
 <!--
 What the agent is working on or thinking about right now.
-Update this as priorities shift.
+This section changes frequently — soul-update evolve mode
+tracks shifts here based on session activity.
 -->
 
 - 

@@ -80,6 +80,12 @@ export const REGISTRY: Record<string, ModuleEntry> = {
     skills: ["skills/rho-onboard"],
     description: "Install and configure Rho from scratch (agent SOP)",
   },
+  "soul-update": {
+    category: "skills",
+    extensions: [],
+    skills: ["skills/soul-update"],
+    description: "Mine sessions to learn about the user and evolve SOUL.md over time",
+  },
 
   // ── UI ────────────────────────────────────────────────
   "usage-bars": {

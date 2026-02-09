@@ -4,6 +4,7 @@ Scheduled/recurring tasks for rho heartbeats.
 
 ## Time-Based Triggers
 
+- [ ] Run soul-update (evolve mode) nightly — last run: never
 - [ ] Add your recurring tasks here (e.g., check weather, run backups)
 - [ ] If a task has cadence (e.g., every 2 hours), include a "last run" timestamp and update it after execution
 

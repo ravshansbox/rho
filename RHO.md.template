@@ -10,6 +10,7 @@ Periodic check-in reminders for the agent.
   - {{OS}}, {{ARCH}}, {{SHELL}}: Detect from environment
   - {{HOME}}, {{CONFIG_PATH}}, {{BRAIN_PATH}}: Set appropriate paths
   - {{SKILLS_PATH}}: Where skills are stored
+- [ ] **SOUL.md SEEDING**: If SOUL.md is still the blank template, run the `soul-update` skill in `bootstrap` mode to interview the user and fill it in. This must happen in an interactive session, not a heartbeat.
 
 ## Scheduled Tasks
 
@@ -20,6 +21,7 @@ Periodic check-in reminders for the agent.
 - [ ] Any urgent messages or notifications I should see?
 - [ ] Any failed commands or errors from recent operations?
 - [ ] Any long-running tasks that finished?
+- [ ] Any unreviewed soul proposals in `~/.rho/soul-proposals.md`?
 
 ## Active Work
 
