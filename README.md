@@ -75,7 +75,7 @@ Inside a session:
 
 ## What it does
 
-The **heartbeat** checks in periodically (default: every 30 min). Each check-in reads your `~/RHO.md` checklist and `~/HEARTBEAT.md` scheduled tasks, runs what needs running, and reports back.
+The **heartbeat** checks in periodically (default: every 30 min). Each check-in reads your `~/.rho/RHO.md` checklist and `~/.rho/HEARTBEAT.md` scheduled tasks, runs what needs running, and reports back.
 
 The **brain** persists across sessions. Learnings, preferences, and context accumulate in `~/.rho/brain/`.
 
@@ -176,8 +176,7 @@ Time-based triggers.
 
 Your agent's voice and identity. Who it is, what it cares about, how it talks.
 
-- Canonical: `~/.rho/SOUL.md`
-- Convenience link: `~/SOUL.md` (installed as a symlink when missing)
+Lives at `~/.rho/SOUL.md`.
 
 ### Brain
 

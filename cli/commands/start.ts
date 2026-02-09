@@ -184,7 +184,7 @@ function ensureTmuxSession(): void {
 
   const r = spawnSync(
     "tmux",
-    [...tmuxBaseArgs(), "new-session", "-d", "-s", SESSION_NAME, "-c", HOME, "pi -c"],
+    [...tmuxBaseArgs(), "new-session", "-d", "-s", SESSION_NAME, "-c", RHO_DIR, "pi -c"],
     { stdio: "ignore" },
   );
   if (r.status !== 0) {

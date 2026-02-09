@@ -11,7 +11,7 @@ A quick, repeatable demo you can run in a live pi session. It shows the check-in
 ## 1. Add a tiny checklist
 
 ```bash
-cat > ~/RHO.md <<'EOF'
+cat > ~/.rho/RHO.md <<'EOF'
 # RHO Checklist
 
 ## Quick Scan

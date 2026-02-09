@@ -1968,15 +1968,29 @@ export default function (pi: ExtensionAPI) {
 
     let fullPrompt = RHO_PROMPT;
     const rhoMd = readMarkdownFile([
+      // Project-local overrides
       path.join(ctx.cwd, "RHO.md"),
       path.join(ctx.cwd, ".pi", "RHO.md"),
       path.join(ctx.cwd, ".rho.md"),
+
+      // Canonical rho location
+      path.join(RHO_DIR, "RHO.md"),
+
+      // Back-compat: older installs used $HOME
+      path.join(HOME, "RHO.md"),
     ]);
     const heartbeatMd = readMarkdownFile([
+      // Project-local overrides
       path.join(ctx.cwd, "HEARTBEAT.md"),
       path.join(ctx.cwd, ".pi", "HEARTBEAT.md"),
       path.join(ctx.cwd, ".heartbeat.md"),
       path.join(ctx.cwd, ".rho-heartbeat.md"),
+
+      // Canonical rho location
+      path.join(RHO_DIR, "HEARTBEAT.md"),
+
+      // Back-compat: older installs used $HOME
+      path.join(HOME, "HEARTBEAT.md"),
     ]);
 
     let tasksSection: string | null = null;
@@ -2008,11 +2022,24 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     if (!IS_SUBAGENT) setRhoHeader(ctx);
 
-    // Brain: cache context for system prompt
+    // Cache context for system prompt
+    //
+    // Goal: keep the user's home directory clean. Canonical config lives under ~/.rho,
+    // but we still want AGENTS/SOUL guidance available no matter where pi starts.
+    let extra: string[] = [];
+
+    const agentsMd = readMarkdownFile([path.join(RHO_DIR, "AGENTS.md")]);
+    if (agentsMd) extra.push("# AGENTS.md\n\n" + agentsMd);
+
+    const soulMd = readMarkdownFile([path.join(RHO_DIR, "SOUL.md")]);
+    if (soulMd) extra.push("# SOUL.md\n\n" + soulMd);
+
     const brainContext = buildBrainContext(ctx.cwd);
-    cachedBrainPrompt = brainContext.trim()
-      ? "\n\n# Memory\n\n" + MEMORY_INSTRUCTIONS + "\n\n" + brainContext
-      : null;
+    if (brainContext.trim()) {
+      extra.push("# Memory\n\n" + MEMORY_INSTRUCTIONS + "\n\n" + brainContext);
+    }
+
+    cachedBrainPrompt = extra.length > 0 ? "\n\n" + extra.join("\n\n") : null;
 
     // Vault: rebuild graph
     rebuildVaultGraph();
@@ -2461,7 +2488,13 @@ export default function (pi: ExtensionAPI) {
           }
 
           case "status": {
-            const rhoMd = readMarkdownFile([path.join(ctx.cwd, "RHO.md"), path.join(ctx.cwd, ".pi", "RHO.md"), path.join(ctx.cwd, ".rho.md")]);
+            const rhoMd = readMarkdownFile([
+              path.join(ctx.cwd, "RHO.md"),
+              path.join(ctx.cwd, ".pi", "RHO.md"),
+              path.join(ctx.cwd, ".rho.md"),
+              path.join(RHO_DIR, "RHO.md"),
+              path.join(HOME, "RHO.md"),
+            ]);
             let hbModelText: string;
             let hbModelSource: "auto" | "pinned" = "auto";
             let hbModelCost: number | undefined;
