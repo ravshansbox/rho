@@ -497,30 +497,43 @@ function formatExistingMemories(entries: Entry[]): string {
   return lines.join("\n");
 }
 
+// Cache the SOP content so we only read from disk once
+let _autoMemorySopCache: string | null = null;
+function loadAutoMemorySop(): string {
+  if (_autoMemorySopCache) return _autoMemorySopCache;
+  const sopPath = path.join(__dirname, "..", "..", "sops", "auto-memory.sop.md");
+  try {
+    _autoMemorySopCache = fs.readFileSync(sopPath, "utf-8");
+  } catch {
+    // Fallback if SOP file is missing (e.g., npm install without sops dir)
+    _autoMemorySopCache = [
+      "Extract durable learnings and user preferences from the conversation.",
+      "Only extract final decisions, corrections, and verified facts.",
+      "Skip intermediate discussion, transient states, and one-off tasks.",
+      "Max 3 items. Return empty arrays if nothing worth extracting.",
+    ].join("\n");
+  }
+  return _autoMemorySopCache;
+}
+
 function buildAutoMemoryPrompt(conversationText: string, existingMemories?: string): string {
+  const sop = loadAutoMemorySop();
   const parts = [
-    "You are a memory extraction system for a personal assistant.",
-    "Extract durable learnings and user preferences that will remain useful across sessions.",
-    "Only include stable facts or clear preferences. Skip one-off tasks, transient requests, and generic facts.",
-    "Keep each entry concise (under 120 characters).",
+    "<sop>",
+    sop,
+    "</sop>",
   ];
 
   if (existingMemories) {
     parts.push(
       "",
-      "IMPORTANT: These memories are already stored. Do NOT extract anything that restates, overlaps with, or is a subset of these:",
       "<existing_memories>",
       existingMemories,
       "</existing_memories>",
-      "",
-      "Only extract genuinely NEW information not covered above."
     );
   }
 
   parts.push(
-    "Output strict JSON only with this shape:",
-    '{"learnings":[{"text":"..."}],"preferences":[{"category":"Communication|Code|Tools|Workflow|General","text":"..."}]}',
-    "If there are no NEW items to add, return {\"learnings\":[],\"preferences\":[]}.",
     "",
     "<conversation>",
     conversationText,
