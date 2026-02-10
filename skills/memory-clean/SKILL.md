@@ -13,8 +13,11 @@ Consolidate an agent's memory file by reading the raw JSONL, deduplicating entri
 
 - **memory_file** (required): Path to the memory JSONL file (e.g., `~/.rho/brain/memory.jsonl`)
 
+**Bundled resources:**
+- `validate-memory.sh` — Validates a memory JSONL file (JSON parsing, required fields, duplicate IDs, category checks, entry counts). Run relative to this skill's directory.
+
 **Constraints for parameter acquisition:**
-- You MUST verify the memory file exists and is valid JSONL before proceeding
+- You MUST verify the memory file exists and is valid JSONL before proceeding (use `validate-memory.sh`)
 - You MUST count the total entries and report the breakdown by type (learning, preference) and category
 
 ## Steps
@@ -98,7 +101,13 @@ Write the new memory file.
 - You MUST preserve the exact field schema: `{"id","type","text","category","used","last_used","created"}`
 - Preferences MUST include the `category` field
 - You MUST write to the original `memory_file` path, replacing the existing file
-- You MUST verify the output is valid by checking that every line parses as JSON
+- You MUST run the bundled validation script to verify the output:
+  ```bash
+  ./validate-memory.sh {memory_file}
+  ```
+  This checks: every line parses as JSON, required fields present, preferences have categories, no duplicate IDs, and reports entry counts.
+- If validation fails, restore from the backup and report the errors
+- Do NOT use shell `read` loops to validate JSON -- embedded quotes get mangled. The script uses `node` for correct parsing.
 
 ### 6. Report
 
