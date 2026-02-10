@@ -1576,6 +1576,14 @@ document.addEventListener("alpine:init", () => {
       try {
         const session = await fetchJson(`/api/sessions/${sessionId}`);
         this.applySession(session);
+
+        // Auto-start RPC for empty sessions so they're immediately usable
+        const messageCount = session.stats?.messageCount ?? session.messageCount ?? 0;
+        const sessionFile = this.getSessionFile(sessionId);
+        if (messageCount === 0 && sessionFile && !this.activeRpcSessionId) {
+          this.startRpcSession(sessionFile);
+          this.enterMaximized();
+        }
       } catch (error) {
         this.error = error.message ?? "Failed to load session";
       } finally {
@@ -1686,6 +1694,11 @@ document.addEventListener("alpine:init", () => {
 
     hasForkPoints() {
       return Boolean(this.latestForkPointId());
+    },
+
+    getSessionFile(sessionId) {
+      const s = this.sessions.find((s) => s.id === sessionId);
+      return s?.file ?? "";
     },
 
     isForkActive() {
