@@ -126,13 +126,15 @@ export default function agentSOPExtension(pi: ExtensionAPI) {
 	async function collectParameters(
 		sop: SOP,
 		ctx: ExtensionContext,
+		prefilled: Record<string, string> = {},
 	): Promise<Record<string, string> | null> {
-		const params: Record<string, string> = {};
+		const params: Record<string, string> = { ...prefilled };
 
 		if (sop.parameters.length === 0) return params;
 
 		if (!ctx.hasUI) {
 			for (const p of sop.parameters) {
+				if (params[p.name]) continue;
 				if (p.defaultValue) {
 					params[p.name] = p.defaultValue;
 				} else if (p.required) {
@@ -148,6 +150,8 @@ export default function agentSOPExtension(pi: ExtensionAPI) {
 		);
 
 		for (const param of sop.parameters) {
+			if (params[param.name]) continue;
+
 			const label = param.required
 				? `${param.name} (required)`
 				: `${param.name} (optional)`;
@@ -183,14 +187,18 @@ export default function agentSOPExtension(pi: ExtensionAPI) {
 		ctx: ExtensionContext,
 		args?: string,
 	) {
-		const params = await collectParameters(sop, ctx);
+		const prefilled: Record<string, string> = {};
+		if (args?.trim() && sop.parameters.length > 0) {
+			const target = sop.parameters.find((p) => p.required) ?? sop.parameters[0];
+			if (target) {
+				prefilled[target.name] = args.trim();
+			}
+		}
+
+		const params = await collectParameters(sop, ctx, prefilled);
 		if (!params) {
 			ctx.ui.notify("SOP cancelled", "warning");
 			return;
-		}
-
-		if (args?.trim() && sop.parameters.some((p) => p.name === "task_description")) {
-			params.task_description = args.trim();
 		}
 
 		if (ctx.hasUI) {
@@ -214,8 +222,18 @@ export default function agentSOPExtension(pi: ExtensionAPI) {
 			);
 		}
 
+		// Build a parameter block for values that had no placeholder in the SOP body,
+		// so the agent actually sees the user's input.
+		const paramLines: string[] = [];
+		for (const [key, value] of Object.entries(resolved)) {
+			paramLines.push(`  <${key}>${value}</${key}>`);
+		}
+		const paramBlock = paramLines.length > 0
+			? `\n\n<user-provided-params>\n${paramLines.join("\n")}\n</user-provided-params>\n`
+			: "";
+
 		pi.sendUserMessage(
-			`Execute the following SOP. Follow the steps in order.\n\n---\n\n${sopContent}`,
+			`Execute the following SOP. Follow the steps in order.${paramBlock}\n\n---\n\n${sopContent}`,
 		);
 	}
 

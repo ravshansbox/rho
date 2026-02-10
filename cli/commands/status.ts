@@ -25,6 +25,7 @@ const RHO_DIR = path.join(HOME, ".rho");
 const PID_PATH = path.join(HOME, PID_FILE);
 const INIT_TOML = path.join(RHO_DIR, "init.toml");
 const HB_STATE_PATH = path.join(RHO_DIR, "rho-state.json");
+const HB_SETTINGS_PATH = path.join(RHO_DIR, "rho-settings.json");
 
 function readInitConfig(): ReturnType<typeof parseInitToml> | null {
   try {
@@ -134,6 +135,31 @@ function readHeartbeatState(): HeartbeatState | null {
   }
 }
 
+function readHeartbeatSettings(): { enabled: boolean; intervalMs: number } | null {
+  try {
+    if (!existsSync(HB_SETTINGS_PATH)) return null;
+    const raw = JSON.parse(readFileSync(HB_SETTINGS_PATH, "utf-8"));
+    if (!raw || typeof raw !== "object") return null;
+    const enabled = typeof (raw as any).enabled === "boolean" ? (raw as any).enabled : null;
+    const intervalMs = typeof (raw as any).intervalMs === "number" ? (raw as any).intervalMs : null;
+    if (enabled === null || intervalMs === null) return null;
+    return { enabled, intervalMs };
+  } catch {
+    return null;
+  }
+}
+
+function mergeHeartbeat(state: HeartbeatState | null, settings: { enabled: boolean; intervalMs: number } | null): HeartbeatState | null {
+  if (!state && !settings) return null;
+  return {
+    enabled: settings?.enabled ?? state?.enabled ?? false,
+    intervalMs: settings?.intervalMs ?? state?.intervalMs ?? 0,
+    lastCheckAt: state?.lastCheckAt ?? null,
+    nextCheckAt: state?.nextCheckAt ?? null,
+    checkCount: state?.checkCount,
+  };
+}
+
 export async function run(args: string[]): Promise<void> {
   if (args.includes("--help") || args.includes("-h")) {
     console.log(`rho status
@@ -175,7 +201,7 @@ Options:
     version: getVersion(),
     agentName,
     config,
-    heartbeat: readHeartbeatState(),
+    heartbeat: mergeHeartbeat(readHeartbeatState(), readHeartbeatSettings()),
     paneOutput: state.tmuxRunning ? capturePaneOutput() : null,
     tmuxSocket: getTmuxSocket(),
   };
