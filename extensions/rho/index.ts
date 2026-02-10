@@ -1605,6 +1605,22 @@ function heartbeatWindowExists(sessionName: string): boolean {
   }
 }
 
+/**
+ * Check if the heartbeat pane is running a shell (idle) or something else (busy).
+ * Returns true if the pane has a non-shell process (e.g., pi) still running.
+ */
+function heartbeatPaneBusy(sessionName: string): boolean {
+  const target = `${sessionName}:${HEARTBEAT_WINDOW_NAME}`;
+  try {
+    const cmd = execSync(`tmux list-panes -t ${shellEscape(target)} -F "#{pane_current_command}"`, { encoding: "utf-8" }).trim();
+    // Shell names that indicate the pane is idle and ready for a command
+    const shells = ["bash", "sh", "zsh", "fish", "dash", "-bash", "-sh", "-zsh"];
+    return !shells.includes(cmd);
+  } catch {
+    return false;
+  }
+}
+
 function ensureTmuxSession(sessionName: string): boolean {
   try {
     execSync(`tmux has-session -t ${shellEscape(sessionName)}`, { stdio: "ignore" });
@@ -1644,8 +1660,12 @@ function runHeartbeatInTmux(prompt: string, modelFlags?: string): boolean {
   try {
     if (!heartbeatWindowExists(sessionName)) {
       execSync(`tmux new-window -d -t ${shellEscape(sessionName)} -n ${shellEscape(HEARTBEAT_WINDOW_NAME)}`, { stdio: "ignore" });
+    } else if (heartbeatPaneBusy(sessionName)) {
+      // Previous heartbeat still running — kill it and respawn a fresh shell
+      execSync(`tmux respawn-pane -k -t ${shellEscape(target)}`, { stdio: "ignore" });
+      // Small delay for the shell to initialize
+      execSync("sleep 0.3", { stdio: "ignore" });
     }
-    execSync(`tmux send-keys -t ${shellEscape(target)} C-c`, { stdio: "ignore" });
     execSync(`tmux send-keys -t ${shellEscape(target)} ${shellEscape(command)} C-m`, { stdio: "ignore" });
     return true;
   } catch {
