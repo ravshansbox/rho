@@ -18,3 +18,6 @@ export type {
 } from "./vault-search-lib.ts";
 
 export { VaultSearch, sanitizeFtsQuery } from "./vault-search-lib.ts";
+
+export type { LockPayload, FileLockOpts } from "./file-lock.ts";
+export { withFileLock, isPidRunning } from "./file-lock.ts";
