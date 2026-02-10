@@ -7,10 +7,11 @@
 
 export interface ModuleEntry {
   category: "core" | "knowledge" | "tools" | "ui" | "skills";
-  extensions: string[];   // paths relative to package root
-  skills: string[];       // paths relative to package root
+  extensions: string[];   // paths relative to package root (empty for npm-backed modules)
+  skills: string[];       // paths relative to package root (empty for npm-backed modules)
   description: string;    // one-line description for init.toml comments
   alwaysOn?: boolean;     // core modules that cannot be disabled
+  npmPackage?: string;    // external npm package — installed/removed by sync based on enabled state
 }
 
 /**
@@ -85,6 +86,14 @@ export const REGISTRY: Record<string, ModuleEntry> = {
     extensions: [],
     skills: ["skills/soul-update"],
     description: "Mine sessions to learn about the user and evolve SOUL.md over time",
+  },
+
+  subagents: {
+    category: "tools",
+    extensions: [],
+    skills: [],
+    npmPackage: "pi-subagents",
+    description: "Subagent delegation with chains, parallel execution, and async support",
   },
 
   // ── Workflows ──────────────────────────────────────────

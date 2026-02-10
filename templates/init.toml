@@ -22,6 +22,7 @@ vault = true                          # Knowledge vault with full-text search an
 brave-search = true                   # Web search via Brave Search API
 x-search = true                       # X/Twitter search via xAI Grok
 email = false                         # Agent email via Rho Cloud (rhobot.dev)
+subagents = true                      # Subagent delegation with chains, parallel, and async
 agent-sop = true                      # Standard Operating Procedures for structured agent workflows
 
 # Skills-only modules (no extensions, just SKILL.md files)

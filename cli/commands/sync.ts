@@ -19,7 +19,7 @@ import {
   validateConfig,
   type PackageEntry,
 } from "../config.ts";
-import { planSync, type SyncLock, findRhoEntryIndex } from "../sync-core.ts";
+import { planSync, collectExternalModulePackages, type SyncLock, findRhoEntryIndex } from "../sync-core.ts";
 
 const HOME = process.env.HOME || os.homedir();
 const RHO_DIR = path.join(HOME, ".rho");
@@ -89,6 +89,15 @@ Options:
     }
   } else {
     pkgConfig = { packages: [] };
+  }
+
+  // ---- 2b. Inject npm-backed registry modules ----
+  const externalModulePkgs = collectExternalModulePackages(config);
+  const existingSources = new Set(pkgConfig.packages.map((p) => p.source));
+  for (const ext of externalModulePkgs) {
+    if (!existingSources.has(ext.source)) {
+      pkgConfig.packages.push(ext);
+    }
   }
 
   // ---- 3. Read settings.json (if exists) ----

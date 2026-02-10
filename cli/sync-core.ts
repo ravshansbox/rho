@@ -36,6 +36,32 @@ export interface SyncPlan {
   newSyncLock: SyncLock;
 }
 
+// ---- Collect external (npm-backed) module packages ----
+
+/**
+ * Collect npm package sources for registry modules that have `npmPackage` set.
+ * Returns sources for modules that are enabled in the config.
+ * Disabled npm-backed modules are omitted — the sync lock diff handles removal.
+ */
+export function collectExternalModulePackages(config: RhoConfig): PackageEntry[] {
+  const entries: PackageEntry[] = [];
+
+  const allCategories = ["core", "knowledge", "tools", "ui", "skills"] as const;
+  for (const [name, reg] of Object.entries(REGISTRY)) {
+    if (!reg.npmPackage) continue;
+
+    // Check if module is enabled in config (default: false for npm-backed)
+    const catModules = config.modules[reg.category as typeof allCategories[number]] ?? {};
+    const enabled = catModules[name] === true;
+
+    if (enabled) {
+      entries.push({ source: `npm:${reg.npmPackage}` });
+    }
+  }
+
+  return entries;
+}
+
 // ---- Build the Rho package entry ----
 
 /**
