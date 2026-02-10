@@ -14,14 +14,14 @@
       rel="stylesheet"
       href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css"
     />
-    <link rel="stylesheet" href="/css/style.css?v=20260210f" />
+    <link rel="stylesheet" href="/css/style.css?v=20260210g" />
     <script src="https://unpkg.com/htmx.org@1.9.12"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/common.min.js"></script>
-    <script src="/js/app.js?v=20260210f" defer></script>
-    <script src="/js/chat.js?v=20260210f" defer></script>
-    <script src="/js/files.js?v=20260210f" defer></script>
-    <script src="/js/tasks.js?v=20260210f" defer></script>
+    <script src="/js/app.js?v=20260210g" defer></script>
+    <script src="/js/chat.js?v=20260210g" defer></script>
+    <script src="/js/files.js?v=20260210g" defer></script>
+    <script src="/js/tasks.js?v=20260210g" defer></script>
     <script src="https://unpkg.com/alpinejs@3.13.5/dist/cdn.min.js" defer></script>
   </head>
   <body>
@@ -168,7 +168,7 @@
                   </div>
                   <div class="chat-empty" x-show="!isLoadingSession && activeSession && !hasMessages()">
                     <span class="empty-icon">&#x1F4AC;</span>
-                    <span>No messages yet. Start a conversation by forking this session.</span>
+                    <span x-text="isForkActive() ? 'Type a message below to start chatting.' : 'No messages yet. Fork this session to start chatting.'"></span>
                   </div>
                   <div class="chat-empty" x-show="!activeSession && !isLoadingSession">
                     <span class="empty-icon">&#x1F4C2;</span>
