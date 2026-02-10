@@ -36,6 +36,31 @@ export type {
   MetaEntry,
   MaterializedBrain,
 } from "./brain-store.ts";
+export {
+  SCHEMA_REGISTRY,
+  validateEntry,
+  deterministicId,
+  readBrain,
+  foldBrain,
+  appendBrainEntry,
+  appendBrainEntryWithDedup,
+  buildBrainPrompt,
+} from "./brain-store.ts";
+
+export type {
+  BrainEntry,
+  BehaviorEntry,
+  IdentityEntry,
+  UserEntry,
+  LearningEntry,
+  PreferenceEntry,
+  ContextEntry,
+  TaskEntry,
+  ReminderEntry,
+  TombstoneEntry,
+  MetaEntry,
+  MaterializedBrain,
+} from "./brain-store.ts";
 
 export {
   SCHEMA_REGISTRY,

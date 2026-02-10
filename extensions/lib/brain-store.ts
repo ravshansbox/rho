@@ -441,3 +441,165 @@ export async function appendBrainEntryWithDedup(
     return true;
   });
 }
+
+// ── buildBrainPrompt ──────────────────────────────────────────────
+
+const DEFAULT_BUDGET = 2000;
+
+const SECTION_WEIGHTS = {
+  behavior: 0.15,
+  preferences: 0.20,
+  context: 0.25,
+  learnings: 0.40,
+};
+
+function approxTokens(s: string): number {
+  return Math.ceil(s.length / 4);
+}
+
+function daysSince(isoDate: string): number {
+  const then = new Date(isoDate).getTime();
+  const now = Date.now();
+  return Math.max(0, Math.floor((now - then) / (1000 * 60 * 60 * 24)));
+}
+
+function scoreLearning(l: LearningEntry, cwd: string): number {
+  const recency = Math.max(0, 10 - Math.floor(daysSince(l.created) / 7));
+  const scopeBoost = l.scope === "project" && l.projectPath && cwd.startsWith(l.projectPath) ? 5 : 0;
+  const manualBoost = l.source === "manual" ? 2 : 0;
+  return recency + scopeBoost + manualBoost;
+}
+
+function takeLinesUntilBudget(lines: string[], budgetTokens: number): { taken: string[]; omitted: number } {
+  const taken: string[] = [];
+  let used = 0;
+  for (const line of lines) {
+    const t = approxTokens(line + "\n");
+    if (used + t > budgetTokens && taken.length > 0) {
+      return { taken, omitted: lines.length - taken.length };
+    }
+    taken.push(line);
+    used += t;
+  }
+  return { taken, omitted: 0 };
+}
+
+export function buildBrainPrompt(
+  brain: MaterializedBrain,
+  cwd: string,
+  opts?: { promptBudget?: number },
+): string {
+  const totalBudget = opts?.promptBudget ?? DEFAULT_BUDGET;
+
+  // Reserve tokens for the wrapper header "## Memory\n\n"
+  const headerOverhead = approxTokens("## Memory\n\n");
+  const budget = totalBudget - headerOverhead;
+
+  // Check if there's anything to render
+  const hasContent =
+    brain.behaviors.length > 0 ||
+    brain.preferences.length > 0 ||
+    brain.contexts.some((c) => cwd.startsWith(c.path)) ||
+    brain.learnings.length > 0 ||
+    brain.identity.size > 0 ||
+    brain.user.size > 0;
+
+  if (!hasContent) return "";
+
+  // Compute section budgets
+  let behaviorBudget = Math.floor(budget * SECTION_WEIGHTS.behavior);
+  let prefsBudget = Math.floor(budget * SECTION_WEIGHTS.preferences);
+  let contextBudget = Math.floor(budget * SECTION_WEIGHTS.context);
+  let learningsBudget = Math.floor(budget * SECTION_WEIGHTS.learnings);
+
+  const sections: string[] = [];
+
+  // ── Behavior ──
+  const behaviorLines: string[] = [];
+  const dos = brain.behaviors.filter((b) => b.category === "do").map((b) => b.text);
+  const donts = brain.behaviors.filter((b) => b.category === "dont").map((b) => b.text);
+  const values = brain.behaviors.filter((b) => b.category === "value").map((b) => b.text);
+  if (dos.length > 0) behaviorLines.push(`**Do:** ${dos.join(". ")}`);
+  if (donts.length > 0) behaviorLines.push(`**Don't:** ${donts.join(". ")}`);
+  if (values.length > 0) behaviorLines.push(`**Values:** ${values.join(". ")}`);
+
+  if (behaviorLines.length > 0) {
+    const header = "## Behavior";
+    const { taken, omitted } = takeLinesUntilBudget(behaviorLines, behaviorBudget - approxTokens(header + "\n"));
+    const lines = [header, ...taken];
+    if (omitted > 0) lines.push(`(…${omitted} more omitted)`);
+    const rendered = lines.join("\n");
+    sections.push(rendered);
+    const used = approxTokens(rendered);
+    learningsBudget += Math.max(0, behaviorBudget - used); // surplus → learnings
+  } else {
+    learningsBudget += behaviorBudget;
+  }
+
+  // ── Preferences ──
+  const prefLines: string[] = [];
+  const prefsByCategory = new Map<string, string[]>();
+  for (const p of brain.preferences) {
+    const arr = prefsByCategory.get(p.category) || [];
+    arr.push(p.text);
+    prefsByCategory.set(p.category, arr);
+  }
+  for (const [cat, items] of [...prefsByCategory.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    prefLines.push(`**${cat}:** ${items.join(". ")}`);
+  }
+
+  if (prefLines.length > 0) {
+    const header = "## Preferences";
+    const { taken, omitted } = takeLinesUntilBudget(prefLines, prefsBudget - approxTokens(header + "\n"));
+    const lines = [header, ...taken];
+    if (omitted > 0) lines.push(`(…${omitted} more omitted)`);
+    const rendered = lines.join("\n");
+    sections.push(rendered);
+    const used = approxTokens(rendered);
+    learningsBudget += Math.max(0, prefsBudget - used);
+  } else {
+    learningsBudget += prefsBudget;
+  }
+
+  // ── Context (longest prefix match) ──
+  const matchingContexts = brain.contexts
+    .filter((c) => cwd.startsWith(c.path))
+    .sort((a, b) => b.path.length - a.path.length);
+  const bestContext = matchingContexts[0];
+
+  if (bestContext) {
+    const header = `## Project: ${bestContext.project}`;
+    const contentLines = bestContext.content.split("\n");
+    const { taken, omitted } = takeLinesUntilBudget(contentLines, contextBudget - approxTokens(header + "\n"));
+    const lines = [header, ...taken];
+    if (omitted > 0) lines.push(`(…${omitted} more omitted)`);
+    const rendered = lines.join("\n");
+    sections.push(rendered);
+    const used = approxTokens(rendered);
+    learningsBudget += Math.max(0, contextBudget - used);
+  } else {
+    learningsBudget += contextBudget;
+  }
+
+  // ── Learnings (ranked) ──
+  if (brain.learnings.length > 0) {
+    const scored = brain.learnings
+      .map((l) => ({ entry: l, score: scoreLearning(l, cwd) }))
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        // Tiebreaker: newest first
+        return b.entry.created.localeCompare(a.entry.created);
+      });
+
+    const learningLines = scored.map((s) => `- ${s.entry.text}`);
+    const header = "## Learnings";
+    const { taken, omitted } = takeLinesUntilBudget(learningLines, learningsBudget - approxTokens(header + "\n"));
+    const lines = [header, ...taken];
+    if (omitted > 0) lines.push(`(…${omitted} more omitted)`);
+    sections.push(lines.join("\n"));
+  }
+
+  if (sections.length === 0) return "";
+
+  return "## Memory\n\n" + sections.join("\n\n");
+}
