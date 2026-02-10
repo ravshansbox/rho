@@ -21,3 +21,30 @@ export { VaultSearch, sanitizeFtsQuery } from "./vault-search-lib.ts";
 
 export type { LockPayload, FileLockOpts } from "./file-lock.ts";
 export { withFileLock, isPidRunning } from "./file-lock.ts";
+
+export type {
+  BrainEntry,
+  BehaviorEntry,
+  IdentityEntry,
+  UserEntry,
+  LearningEntry,
+  PreferenceEntry,
+  ContextEntry,
+  TaskEntry,
+  ReminderEntry,
+  TombstoneEntry,
+  MetaEntry,
+  MaterializedBrain,
+} from "./brain-store.ts";
+
+export {
+  SCHEMA_REGISTRY,
+  BRAIN_DIR,
+  BRAIN_PATH,
+  validateEntry,
+  deterministicId,
+  readBrain,
+  foldBrain,
+  appendBrainEntry,
+  appendBrainEntryWithDedup,
+} from "./brain-store.ts";
