@@ -194,36 +194,8 @@ export function planBootstrap(input: PlanBootstrapInput): BootstrapPlan {
   const filesToCreate = new Map<string, string>();
   const skipped: string[] = [];
 
-  // ---- AGENTS.md (template variable substitution) ----
-  const agentsMdTemplate = resolve(REPO_ROOT, "AGENTS.md.template");
-  if (existsSync(agentsMdTemplate)) {
-    if (!existingRhoFiles.has("AGENTS.md") || force) {
-      const content = generateAgentsMd(name, piDir, rhoDir);
-      filesToCreate.set("AGENTS.md", content);
-    } else {
-      skipped.push("AGENTS.md");
-    }
-  }
-
-  // ---- RHO.md ----
-  const rhoMdTemplate = resolve(REPO_ROOT, "RHO.md.template");
-  if (existsSync(rhoMdTemplate)) {
-    if (!existingRhoFiles.has("RHO.md")) {
-      filesToCreate.set("RHO.md", readFileSync(rhoMdTemplate, "utf-8"));
-    } else {
-      skipped.push("RHO.md");
-    }
-  }
-
-  // ---- HEARTBEAT.md ----
-  const heartbeatTemplate = resolve(REPO_ROOT, "HEARTBEAT.md.template");
-  if (existsSync(heartbeatTemplate)) {
-    if (!existingRhoFiles.has("HEARTBEAT.md")) {
-      filesToCreate.set("HEARTBEAT.md", readFileSync(heartbeatTemplate, "utf-8"));
-    } else {
-      skipped.push("HEARTBEAT.md");
-    }
-  }
+  // AGENTS.md, RHO.md, HEARTBEAT.md removed — brain.jsonl is now the single source of truth.
+  // Identity/behavior data lives in brain entries; heartbeat reads reminders/tasks from brain.
 
   // ---- Brain defaults ----
   const brainFilesToCopy = new Map<string, string>();

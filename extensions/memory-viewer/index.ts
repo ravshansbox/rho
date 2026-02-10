@@ -12,53 +12,25 @@
  *   Esc      - Close
  */
 
-import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { DynamicBorder, getMarkdownTheme } from "@mariozechner/pi-coding-agent";
+import { getMarkdownTheme } from "@mariozechner/pi-coding-agent";
 import { Markdown, matchesKey, Key, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import type { TUI } from "@mariozechner/pi-tui";
 import type { Theme } from "@mariozechner/pi-coding-agent";
-
-interface MemoryEntry {
-	id: string;
-	type: string;
-	text: string;
-	category?: string;
-	used?: number;
-	last_used?: string;
-	created: string;
-}
-
-interface BehaviorEntry {
-	id: string;
-	type: "behavior";
-	category: "do" | "dont" | "value";
-	text: string;
-	created: string;
-}
-
-function readJsonl<T>(path: string): T[] {
-	if (!existsSync(path)) return [];
-	const content = readFileSync(path, "utf-8").trim();
-	if (!content) return [];
-	return content.split("\n").map((line) => JSON.parse(line));
-}
+import { readBrain, foldBrain, BRAIN_PATH } from "../lib/brain-store.ts";
 
 function buildMarkdown(): string {
-	const brainDir = join(homedir(), ".rho", "brain");
-
-	// Read all sources
-	const behaviors = readJsonl<BehaviorEntry>(join(brainDir, "core.jsonl"));
-	const memories = readJsonl<MemoryEntry>(join(brainDir, "memory.jsonl"));
+	const { entries } = readBrain(BRAIN_PATH);
+	const brain = foldBrain(entries);
 	const sections: string[] = [];
 
 	// Behavior section
-	if (behaviors.length > 0) {
-		const dos = behaviors.filter((b) => b.category === "do");
-		const donts = behaviors.filter((b) => b.category === "dont");
-		const values = behaviors.filter((b) => b.category === "value");
+	if (brain.behaviors.length > 0) {
+		const dos = brain.behaviors.filter((b) => b.category === "do");
+		const donts = brain.behaviors.filter((b) => b.category === "dont");
+		const values = brain.behaviors.filter((b) => b.category === "value");
 
 		let s = "# Behavior\n";
 		if (dos.length > 0) {
@@ -77,11 +49,10 @@ function buildMarkdown(): string {
 	}
 
 	// Preferences section
-	const preferences = memories.filter((m) => m.type === "preference");
-	if (preferences.length > 0) {
+	if (brain.preferences.length > 0) {
 		let s = "# Preferences\n";
-		const byCategory = new Map<string, MemoryEntry[]>();
-		for (const p of preferences) {
+		const byCategory = new Map<string, typeof brain.preferences>();
+		for (const p of brain.preferences) {
 			const cat = p.category || "General";
 			if (!byCategory.has(cat)) byCategory.set(cat, []);
 			byCategory.get(cat)!.push(p);
@@ -94,18 +65,43 @@ function buildMarkdown(): string {
 	}
 
 	// Learnings section
-	const learnings = memories.filter((m) => m.type === "learning");
-	if (learnings.length > 0) {
-		let s = `# Learnings (${learnings.length})\n\n`;
-		for (const l of learnings) {
-			const used = l.used ? ` (used ${l.used}x)` : "";
-			s += `- ${l.text}${used}\n`;
+	if (brain.learnings.length > 0) {
+		let s = `# Learnings (${brain.learnings.length})\n\n`;
+		for (const l of brain.learnings) {
+			s += `- ${l.text}\n`;
 		}
 		sections.push(s);
 	}
 
-	// Daily memory files
-	const memoryDir = join(brainDir, "memory");
+	// Reminders section
+	if (brain.reminders.length > 0) {
+		let s = `# Reminders (${brain.reminders.length})\n\n`;
+		for (const r of brain.reminders) {
+			const status = r.enabled ? "active" : "disabled";
+			const cadence = r.cadence.kind === "interval" ? `every ${r.cadence.every}` : `daily at ${r.cadence.at}`;
+			s += `- [${r.id}] ${r.text} (${cadence}, ${status})\n`;
+		}
+		sections.push(s);
+	}
+
+	// Tasks section
+	if (brain.tasks.length > 0) {
+		const pending = brain.tasks.filter((t) => t.status === "pending");
+		const done = brain.tasks.filter((t) => t.status === "done");
+		let s = `# Tasks (${pending.length} pending, ${done.length} done)\n\n`;
+		for (const t of pending) {
+			const pri = t.priority !== "normal" ? ` (${t.priority})` : "";
+			const due = t.due ? ` due:${t.due}` : "";
+			s += `- [ ] [${t.id}] ${t.description}${pri}${due}\n`;
+		}
+		for (const t of done) {
+			s += `- [x] [${t.id}] ${t.description}\n`;
+		}
+		sections.push(s);
+	}
+
+	// Daily memory files (legacy, kept for historical view)
+	const memoryDir = join(BRAIN_PATH, "..", "memory");
 	if (existsSync(memoryDir)) {
 		const files = readdirSync(memoryDir)
 			.filter((f) => f.endsWith(".md"))

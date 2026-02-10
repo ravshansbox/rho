@@ -42,7 +42,7 @@ import * as crypto from "node:crypto";
 import { execSync } from "node:child_process";
 import { VaultSearch, parseFrontmatter, extractWikilinks, extractTitle } from "../lib/mod.ts";
 import { handleBrainAction } from "../lib/brain-tool.ts";
-import { readBrain, foldBrain, buildBrainPrompt, BRAIN_PATH } from "../lib/brain-store.ts";
+import { readBrain, foldBrain, buildBrainPrompt, appendBrainEntryWithDedup, BRAIN_PATH } from "../lib/brain-store.ts";
 
 export { parseFrontmatter, extractWikilinks };
 export {
@@ -92,8 +92,9 @@ function getMemoryCount(): number {
     return cachedMemoryCount;
   }
   try {
-    const content = fs.readFileSync(MEMORY_FILE, "utf-8").trim();
-    cachedMemoryCount = content ? content.split("\n").length : 0;
+    const { entries } = readBrain(BRAIN_PATH);
+    const brain = foldBrain(entries);
+    cachedMemoryCount = brain.learnings.length + brain.preferences.length;
   } catch {
     cachedMemoryCount = 0;
   }
@@ -390,135 +391,71 @@ function isDuplicatePreference(existing: Entry[], text: string, category: string
   );
 }
 
-function storeLearningEntry(text: string, options?: { source?: string; maxLength?: number }): StoreResult {
+async function storeLearningEntry(text: string, options?: { source?: string; maxLength?: number }): Promise<StoreResult> {
   const normalized = normalizeMemoryText(text);
   if (!normalized) return { stored: false, reason: "empty" };
   if (options?.maxLength && normalized.length > options.maxLength) {
     return { stored: false, reason: "too_long" };
   }
-  const existing = readJsonl<Entry>(MEMORY_FILE);
-  if (isDuplicateLearning(existing, normalized)) {
-    return { stored: false, reason: "duplicate" };
-  }
-  const entry: LearningEntry = {
-    id: nanoid(),
-    type: "learning",
+
+  const entry = {
+    id: crypto.randomBytes(4).toString("hex"),
+    type: "learning" as const,
     text: normalized,
-    used: 0,
-    last_used: today(),
-    created: today(),
     source: options?.source,
+    created: new Date().toISOString(),
   };
-  appendJsonl(MEMORY_FILE, entry);
-  appendDailyMemoryEntry(entry);
+
+  const written = await appendBrainEntryWithDedup(
+    BRAIN_PATH,
+    entry,
+    (existing) => existing.some(e =>
+      e.type === "learning" &&
+      normalizeMemoryText((e as any).text || "").toLowerCase() === normalized.toLowerCase()
+    ),
+  );
+
+  if (!written) return { stored: false, reason: "duplicate" };
+  brainCache = null;
   return { stored: true, id: entry.id };
 }
 
-function storePreferenceEntry(
+async function storePreferenceEntry(
   text: string,
   category: string,
   options?: { maxLength?: number }
-): StoreResult {
+): Promise<StoreResult> {
   const normalized = normalizeMemoryText(text);
   if (!normalized) return { stored: false, reason: "empty" };
   if (options?.maxLength && normalized.length > options.maxLength) {
     return { stored: false, reason: "too_long" };
   }
   const normalizedCategory = sanitizeCategory(category);
-  const existing = readJsonl<Entry>(MEMORY_FILE);
-  if (isDuplicatePreference(existing, normalized, normalizedCategory)) {
-    return { stored: false, reason: "duplicate" };
-  }
-  const entry: PreferenceEntry = {
-    id: nanoid(),
-    type: "preference",
+
+  const entry = {
+    id: crypto.randomBytes(4).toString("hex"),
+    type: "preference" as const,
     category: normalizedCategory,
     text: normalized,
-    created: today(),
+    created: new Date().toISOString(),
   };
-  appendJsonl(MEMORY_FILE, entry);
-  appendDailyMemoryEntry(entry);
+
+  const written = await appendBrainEntryWithDedup(
+    BRAIN_PATH,
+    entry,
+    (existing) => existing.some(e =>
+      e.type === "preference" &&
+      normalizeMemoryText((e as any).text || "").toLowerCase() === normalized.toLowerCase() &&
+      (e as any).category === normalizedCategory
+    ),
+  );
+
+  if (!written) return { stored: false, reason: "duplicate" };
+  brainCache = null;
   return { stored: true, id: entry.id };
 }
 
-// ─── Brain: Context Builder ───────────────────────────────────────────────────
-
-function buildBrainContext(cwd: string): string {
-  const sections: string[] = [];
-
-  const core = readJsonl<Entry>(CORE_FILE);
-
-  const identity = core.filter((e): e is IdentityEntry => e.type === "identity");
-  if (identity.length > 0) {
-    sections.push("## Identity\n" + identity.map((e) => `- ${e.key}: ${e.value}`).join("\n"));
-  }
-
-  const user = core.filter((e): e is UserEntry => e.type === "user");
-  if (user.length > 0) {
-    sections.push("## User\n" + user.map((e) => `- ${e.key}: ${e.value}`).join("\n"));
-  }
-
-  const behaviors = core.filter((e): e is BehaviorEntry => e.type === "behavior");
-  if (behaviors.length > 0) {
-    const dos = behaviors.filter((b) => b.category === "do").map((b) => b.text);
-    const donts = behaviors.filter((b) => b.category === "dont").map((b) => b.text);
-    const values = behaviors.filter((b) => b.category === "value").map((b) => b.text);
-
-    let behaviorSection = "## Behavior\n";
-    if (dos.length > 0) behaviorSection += `**Do:** ${dos.join(". ")}.\n`;
-    if (donts.length > 0) behaviorSection += `**Don't:** ${donts.join(". ")}.\n`;
-    if (values.length > 0) behaviorSection += `**Values:** ${values.join(". ")}.`;
-    sections.push(behaviorSection.trim());
-  }
-
-  const memory = readJsonl<Entry>(MEMORY_FILE);
-  const learnings = memory.filter((e): e is LearningEntry => e.type === "learning");
-  const preferences = memory.filter((e): e is PreferenceEntry => e.type === "preference");
-
-  if (learnings.length > 0) {
-    const sorted = [...learnings].sort((a, b) => {
-      if (b.used !== a.used) return b.used - a.used;
-      return b.last_used.localeCompare(a.last_used);
-    });
-    sections.push("## Learnings\n" + sorted.map((l) => `- ${l.text}`).join("\n"));
-  }
-
-  if (preferences.length > 0) {
-    const byCategory = new Map<string, string[]>();
-    for (const p of preferences) {
-      const list = byCategory.get(p.category) || [];
-      list.push(p.text);
-      byCategory.set(p.category, list);
-    }
-    let prefSection = "## Preferences\n";
-    for (const [cat, items] of byCategory) {
-      prefSection += `**${cat}:** ${items.join(". ")}.\n`;
-    }
-    sections.push(prefSection.trim());
-  }
-
-  const contexts = readJsonl<ContextEntry>(CONTEXT_FILE);
-  const matched = contexts.find((c) => cwd.startsWith(c.path));
-  if (matched) {
-    sections.push(`## Project: ${matched.project}\n\n${matched.content}`);
-  }
-
-  return sections.join("\n\n");
-}
-
-const MEMORY_INSTRUCTIONS = `## Memory
-
-You have persistent memory via the \`memory\` tool. Store insights that help future sessions.
-
-**Store when:**
-- User corrects you → learning
-- You discover a pattern/convention → learning  
-- User states a preference → preference with category
-
-**Good learnings:** "User prefers early returns over nested ifs", "This repo uses pnpm not npm", "API uses snake_case"
-**Bad learnings:** "User asked about X", "Fixed a bug", "Session went well"
-
-**Don't store:** obvious things, duplicates, session-specific details.`.trim();
+// buildBrainContext and MEMORY_INSTRUCTIONS removed — replaced by brain-store's buildBrainPrompt
 
 // ─── Brain: Auto-Memory Extraction ───────────────────────────────────────────
 
@@ -610,8 +547,13 @@ async function runAutoMemoryExtraction(
     ctx.ui.notify(`Auto-memory: extracting via ${model.name}...`, "info");
   }
 
-  const existing = readJsonl<Entry>(MEMORY_FILE);
-  const existingText = existing.length > 0 ? formatExistingMemories(existing) : undefined;
+  const { entries: brainEntries } = readBrain(BRAIN_PATH);
+  const existingBrain = foldBrain(brainEntries);
+  const existingForPrompt: Entry[] = [
+    ...existingBrain.learnings.map(l => ({ ...l } as unknown as Entry)),
+    ...existingBrain.preferences.map(p => ({ ...p } as unknown as Entry)),
+  ];
+  const existingText = existingForPrompt.length > 0 ? formatExistingMemories(existingForPrompt) : undefined;
   const prompt = buildAutoMemoryPrompt(conversationText, existingText);
 
   let response;
@@ -684,7 +626,7 @@ async function runAutoMemoryExtraction(
 
   for (const text of extractedLearnings) {
     if (remaining <= 0) break;
-    const result = storeLearningEntry(text, { source, maxLength: maxText });
+    const result = await storeLearningEntry(text, { source, maxLength: maxText });
     if (result.stored) {
       storedLearnings += 1;
       remaining -= 1;
@@ -694,7 +636,7 @@ async function runAutoMemoryExtraction(
 
   for (const pref of extractedPreferences) {
     if (remaining <= 0) break;
-    const result = storePreferenceEntry(pref.text, pref.category, { maxLength: maxText });
+    const result = await storePreferenceEntry(pref.text, pref.category, { maxLength: maxText });
     if (result.stored) {
       storedPrefs += 1;
       remaining -= 1;
@@ -726,59 +668,9 @@ async function runAutoMemoryExtraction(
   return { storedLearnings, storedPrefs };
 }
 
-// ─── Brain: Remove Entry ──────────────────────────────────────────────────────
+// removeMemoryEntry removed — replaced by brain tool's remove action
 
-function removeMemoryEntry(id: string): { ok: boolean; message: string } {
-  const entries = readJsonl<Entry>(MEMORY_FILE);
-  const idx = entries.findIndex((e) => e.id === id);
-  if (idx === -1) return { ok: false, message: `Entry '${id}' not found` };
-
-  const entry = entries[idx];
-  const text = (entry as LearningEntry | PreferenceEntry).text || "(unknown)";
-
-  // Archive before removing
-  appendJsonl(ARCHIVE_FILE, { ...entry, archived: today(), reason: "manual" });
-
-  entries.splice(idx, 1);
-  writeJsonl(MEMORY_FILE, entries);
-  return { ok: true, message: `Removed [${id}]: ${text}` };
-}
-
-// ─── Brain: Archive Stale Memories ────────────────────────────────────────────
-
-function archiveStaleMemories(maxAgeDays: number = 90): { archived: number } {
-  const entries = readJsonl<Entry>(MEMORY_FILE);
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - maxAgeDays);
-  const cutoffStr = cutoff.toISOString().split("T")[0];
-
-  const keep: Entry[] = [];
-  let archived = 0;
-
-  for (const e of entries) {
-    if (e.type === "learning") {
-      const l = e as LearningEntry;
-      // Keep if used recently or used frequently
-      if (l.last_used >= cutoffStr || l.used >= 3) {
-        keep.push(e);
-        continue;
-      }
-      // Archive stale, unused entries
-      appendJsonl(ARCHIVE_FILE, { ...e, archived: today(), reason: "decay" });
-      archived++;
-    } else if (e.type === "preference") {
-      // Preferences don't decay — they're explicit user choices
-      keep.push(e);
-    } else {
-      keep.push(e);
-    }
-  }
-
-  if (archived > 0) {
-    writeJsonl(MEMORY_FILE, keep);
-  }
-  return { archived };
-}
+// archiveStaleMemories removed — replaced by brain tool's decay action
 
 // ─── Brain: Legacy Migration ──────────────────────────────────────────────────
 
@@ -803,17 +695,15 @@ function migrateLegacyBrain(): void {
 }
 
 function bootstrapBrainDefaults(extensionDir: string): void {
+  const brainTarget = path.join(BRAIN_DIR, "brain.jsonl");
+  if (fs.existsSync(brainTarget)) return;
+
   const defaultsDir = path.join(path.dirname(extensionDir), "brain");
-  if (!fs.existsSync(defaultsDir)) return;
+  const defaultFile = path.join(defaultsDir, "brain.jsonl.default");
+  if (!fs.existsSync(defaultFile)) return;
 
   fs.mkdirSync(BRAIN_DIR, { recursive: true });
-  for (const file of fs.readdirSync(defaultsDir)) {
-    if (!file.endsWith(".jsonl.default")) continue;
-    const target = path.join(BRAIN_DIR, file.replace(".default", ""));
-    if (!fs.existsSync(target)) {
-      fs.copyFileSync(path.join(defaultsDir, file), target);
-    }
-  }
+  fs.copyFileSync(defaultFile, brainTarget);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1155,16 +1045,8 @@ const HEARTBEAT_TRIGGER_PATH = path.join(RHO_DIR, "heartbeat.trigger");
 const HEARTBEAT_LOCK_REFRESH_MS = 15 * 1000;
 const HEARTBEAT_LOCK_STALE_MS = 60 * 1000;
 
-const RHO_PROMPT = `This is a rho check-in. Review the following:
-
-1. Read RHO.md and HEARTBEAT.md from the workspace if they exist - follow any checklists or scheduled tasks there
-2. Check for any outstanding tasks, TODOs, or follow-ups from our conversation
-3. Review any long-running operations or background processes
-4. Surface anything urgent that needs attention
-
-If nothing needs attention, reply with exactly: RHO_OK
-If something needs attention, reply with the alert (do NOT include RHO_OK).
-If the user asks for scheduled tasks or recurring reminders, add them to HEARTBEAT.md.`;
+// DEPRECATED: RHO_PROMPT was the old heartbeat prompt template that read from MD files.
+// Heartbeat now builds prompts from brain.jsonl reminders + tasks. Kept for reference only.
 
 // ─── Heartbeat Helpers ────────────────────────────────────────────────────────
 
@@ -2004,53 +1886,63 @@ export default function (pi: ExtensionAPI) {
     hbState.lastCheckAt = Date.now();
     hbState.checkCount++;
 
-    let fullPrompt = RHO_PROMPT;
-    const rhoMd = readMarkdownFile([
-      // Project-local overrides
-      path.join(ctx.cwd, "RHO.md"),
-      path.join(ctx.cwd, ".pi", "RHO.md"),
-      path.join(ctx.cwd, ".rho.md"),
+    // Read brain and extract due reminders + pending tasks
+    const { entries } = readBrain(BRAIN_PATH);
+    const brain = foldBrain(entries);
 
-      // Canonical rho location
-      path.join(RHO_DIR, "RHO.md"),
+    const now = new Date();
+    const dueReminders = brain.reminders.filter(r => {
+      if (!r.enabled) return false;
+      if (!r.next_due) return true; // never run → due immediately
+      return new Date(r.next_due) <= now;
+    });
 
-      // Back-compat: older installs used $HOME
-      path.join(HOME, "RHO.md"),
-    ]);
-    const heartbeatMd = readMarkdownFile([
-      // Project-local overrides
-      path.join(ctx.cwd, "HEARTBEAT.md"),
-      path.join(ctx.cwd, ".pi", "HEARTBEAT.md"),
-      path.join(ctx.cwd, ".heartbeat.md"),
-      path.join(ctx.cwd, ".rho-heartbeat.md"),
+    const pendingTasks = brain.tasks.filter(t => t.status === "pending");
 
-      // Canonical rho location
-      path.join(RHO_DIR, "HEARTBEAT.md"),
-
-      // Back-compat: older installs used $HOME
-      path.join(HOME, "HEARTBEAT.md"),
-    ]);
-
-    let tasksSection: string | null = null;
-    try { tasksSection = buildHeartbeatSection(); } catch { /* ignore */ }
-
-    if (!rhoMd && !heartbeatMd && !tasksSection) {
+    // Skip if nothing to do
+    if (dueReminders.length === 0 && pendingTasks.length === 0) {
       if (ctx.hasUI) ctx.ui.notify("ρ: skipped (nothing to do)", "info");
       scheduleNext(ctx);
       return;
     }
-    if (rhoMd) fullPrompt += `\n\n---\n\nRHO.md content:\n${rhoMd}`;
-    if (heartbeatMd) fullPrompt += `\n\n---\n\nHEARTBEAT.md content:\n${heartbeatMd}`;
-    if (tasksSection) fullPrompt += `\n\n---\n\n${tasksSection}`;
 
-    // Include identity context so heartbeat agent has personality/voice guidance
-    const agentsMdContent = readMarkdownFile([path.join(RHO_DIR, "AGENTS.md")]);
-    const soulMdContent = readMarkdownFile([path.join(RHO_DIR, "SOUL.md")]);
-    if (agentsMdContent || soulMdContent) {
-      fullPrompt += "\n\n---\n\nIdentity context:";
-      if (agentsMdContent) fullPrompt += "\n\n" + agentsMdContent;
-      if (soulMdContent) fullPrompt += "\n\n" + soulMdContent;
+    // Build heartbeat prompt
+    let remindersSection = "None due.";
+    if (dueReminders.length > 0) {
+      remindersSection = dueReminders.map(r => {
+        const priority = r.priority !== "normal" ? ` (${r.priority})` : "";
+        const tags = r.tags.length > 0 ? ` [${r.tags.join(", ")}]` : "";
+        return `- [${r.id}] ${r.text}${priority}${tags}`;
+      }).join("\n");
     }
+
+    let tasksSection = "No pending tasks.";
+    if (pendingTasks.length > 0) {
+      const nowStr = now.toISOString().slice(0, 10);
+      tasksSection = pendingTasks.map(t => {
+        let line = `- [${t.id}] ${t.description}`;
+        if (t.priority !== "normal") line += ` (${t.priority})`;
+        if (t.due) {
+          if (t.due < nowStr) line += ` **OVERDUE** (due ${t.due})`;
+          else line += ` (due ${t.due})`;
+        }
+        if (t.tags.length > 0) line += ` [${t.tags.join(", ")}]`;
+        return line;
+      }).join("\n");
+    }
+
+    const fullPrompt = `You are rho performing a scheduled check-in.
+
+## Due Reminders
+${remindersSection}
+
+## Pending Tasks
+${tasksSection}
+
+Instructions:
+- Execute each due reminder. Use the brain tool's reminder_run action to record results.
+- Review pending tasks and act on any that are actionable.
+- If nothing needs attention, respond with RHO_OK.`;
 
     buildModelFlags(ctx).then((modelFlags) => {
       const sentToTmux = runHeartbeatInTmux(fullPrompt, modelFlags || undefined);
@@ -2075,27 +1967,9 @@ export default function (pi: ExtensionAPI) {
       setRhoFooter(ctx);
     }
 
-    // Cache context for system prompt
-    //
-    // Goal: keep the user's home directory clean. Canonical config lives under ~/.rho,
-    // but we still want AGENTS/SOUL guidance available no matter where pi starts.
-    let extra: string[] = [];
-
-    const agentsMd = readMarkdownFile([path.join(RHO_DIR, "AGENTS.md")]);
-    if (agentsMd) extra.push("# AGENTS.md\n\n" + agentsMd);
-
-    const soulMd = readMarkdownFile([path.join(RHO_DIR, "SOUL.md")]);
-    if (soulMd) extra.push("# SOUL.md\n\n" + soulMd);
-
-    const brainContext = buildBrainContext(ctx.cwd);
-    if (brainContext.trim()) {
-      extra.push("# Memory\n\n" + MEMORY_INSTRUCTIONS + "\n\n" + brainContext);
-    }
-
-    cachedBrainPrompt = extra.length > 0 ? "\n\n" + extra.join("\n\n") : null;
-
-    // Also build the new brain cache (Phase 2 — coexists with old buildBrainContext)
-    rebuildBrainCache(ctx.cwd);
+    // Build brain prompt from brain.jsonl (single source of truth)
+    const brainPrompt = rebuildBrainCache(ctx.cwd);
+    cachedBrainPrompt = brainPrompt ? "\n\n" + brainPrompt : null;
 
     // Vault: rebuild graph
     rebuildVaultGraph();
@@ -2699,13 +2573,12 @@ export default function (pi: ExtensionAPI) {
           }
 
           case "status": {
-            const rhoMd = readMarkdownFile([
-              path.join(ctx.cwd, "RHO.md"),
-              path.join(ctx.cwd, ".pi", "RHO.md"),
-              path.join(ctx.cwd, ".rho.md"),
-              path.join(RHO_DIR, "RHO.md"),
-              path.join(HOME, "RHO.md"),
-            ]);
+            // Read brain for reminder/task counts
+            const { entries: statusEntries } = readBrain(BRAIN_PATH);
+            const statusBrain = foldBrain(statusEntries);
+            const activeReminders = statusBrain.reminders.filter(r => r.enabled).length;
+            const pendingTaskCount = statusBrain.tasks.filter(t => t.status === "pending").length;
+
             let hbModelText: string;
             let hbModelSource: "auto" | "pinned" = "auto";
             let hbModelCost: number | undefined;
@@ -2740,7 +2613,7 @@ export default function (pi: ExtensionAPI) {
             if (hbState.nextCheckAt && hbState.enabled && hbState.intervalMs > 0) {
               text += `- Next check-in: in ${Math.ceil((hbState.nextCheckAt - Date.now()) / (60 * 1000))}m\n`;
             }
-            text += `- RHO.md: ${rhoMd ? "found" : "not found"}`;
+            text += `- Brain: ${activeReminders} active reminders, ${pendingTaskCount} pending tasks`;
 
             return { content: [{ type: "text", text }], details: { action: "status", enabled: hbState.enabled, intervalMs: hbState.intervalMs, lastCheckAt: hbState.lastCheckAt, nextCheckAt: hbState.nextCheckAt, checkCount: hbState.checkCount, heartbeatModel: hbState.heartbeatModel, heartbeatModelSource: hbModelSource, heartbeatModelCost: hbModelCost } as RhoDetails };
           }
@@ -2869,24 +2742,40 @@ export default function (pi: ExtensionAPI) {
       const parts = args?.trim().split(/\s+/) || [];
       const subcmd = parts[0] || "stats";
 
+      const { entries } = readBrain(BRAIN_PATH);
+      const brain = foldBrain(entries);
+
       if (subcmd === "stats" || !subcmd) {
-        const core = readJsonl<Entry>(CORE_FILE);
-        const memory = readJsonl<Entry>(MEMORY_FILE);
-        const lCount = memory.filter((e) => e.type === "learning").length;
-        const pCount = memory.filter((e) => e.type === "preference").length;
-        const identity = core.filter((e) => e.type === "identity").length;
-        const behaviors = core.filter((e) => e.type === "behavior").length;
-        ctx.ui.notify(`🧠 ${lCount}L ${pCount}P | core: ${identity}id ${behaviors}beh`, "info");
+        const lCount = brain.learnings.length;
+        const pCount = brain.preferences.length;
+        const tCount = brain.tasks.length;
+        const rCount = brain.reminders.length;
+        const idCount = brain.identity.size;
+        const uCount = brain.user.size;
+        const bCount = brain.behaviors.length;
+        ctx.ui.notify(`🧠 ${lCount}L ${pCount}P ${tCount}T ${rCount}R | ${bCount}beh ${idCount}id ${uCount}usr`, "info");
       } else if (subcmd === "search") {
         const query = parts.slice(1).join(" ").toLowerCase();
         if (!query) { ctx.ui.notify("Usage: /brain search <query>", "error"); return; }
-        const memory = readJsonl<Entry>(MEMORY_FILE);
-        const matches = memory.filter((e) => {
-          if (e.type === "learning") return (e as LearningEntry).text.toLowerCase().includes(query);
-          if (e.type === "preference") return (e as PreferenceEntry).text.toLowerCase().includes(query);
-          return false;
-        });
-        ctx.ui.notify(matches.length ? `Found ${matches.length} matches` : "No matches", "info");
+
+        // Search across all text fields in all entry types
+        const allSearchable: Array<{ type: string; id: string; text: string }> = [];
+        for (const b of brain.behaviors) allSearchable.push({ type: "behavior", id: b.id, text: b.text });
+        for (const l of brain.learnings) allSearchable.push({ type: "learning", id: l.id, text: l.text });
+        for (const p of brain.preferences) allSearchable.push({ type: "preference", id: p.id, text: `[${p.category}] ${p.text}` });
+        for (const t of brain.tasks) allSearchable.push({ type: "task", id: t.id, text: t.description });
+        for (const r of brain.reminders) allSearchable.push({ type: "reminder", id: r.id, text: r.text });
+        for (const [, v] of brain.identity) allSearchable.push({ type: "identity", id: v.id, text: `${v.key}: ${v.value}` });
+        for (const [, v] of brain.user) allSearchable.push({ type: "user", id: v.id, text: `${v.key}: ${v.value}` });
+
+        const matches = allSearchable.filter(e => e.text.toLowerCase().includes(query));
+        if (matches.length === 0) {
+          ctx.ui.notify("No matches", "info");
+        } else {
+          const lines = matches.slice(0, 10).map(m => `[${m.type}:${m.id}] ${m.text}`);
+          const more = matches.length > 10 ? `\n(+${matches.length - 10} more)` : "";
+          ctx.ui.notify(`Found ${matches.length} matches:\n${lines.join("\n")}${more}`, "info");
+        }
       } else {
         ctx.ui.notify("Usage: /brain [stats|search <query>]", "error");
       }
