@@ -20,6 +20,7 @@ import {
   type PackageEntry,
 } from "../config.ts";
 import { planSync, collectExternalModulePackages, type SyncLock, findRhoEntryIndex } from "../sync-core.ts";
+import { PID_FILE } from "../daemon-core.ts";
 
 const HOME = process.env.HOME || os.homedir();
 const RHO_DIR = path.join(HOME, ".rho");
@@ -28,6 +29,7 @@ const INIT_TOML = path.join(RHO_DIR, "init.toml");
 const PACKAGES_TOML = path.join(RHO_DIR, "packages.toml");
 const SYNC_LOCK = path.join(RHO_DIR, "sync.lock");
 const HB_STATE_PATH = path.join(RHO_DIR, "rho-state.json");
+const PID_PATH = path.join(HOME, PID_FILE);
 
 // Data directories to ensure exist
 const DATA_DIRS = [path.join(RHO_DIR, "brain"), path.join(RHO_DIR, "vault")];
@@ -255,6 +257,9 @@ Options:
     }
   }
 
+  // ---- 13b. Ask running daemon to reload web config (best-effort) ----
+  signalDaemonReload({ verbose });
+
   // ---- 14. Print result summary ----
   const parts: string[] = [];
   const disabledNames = getDisabledModuleNames(config);
@@ -360,6 +365,39 @@ function readJsonFile(filePath: string): Record<string, any> | null {
     // ignore
   }
   return null;
+}
+
+function readDaemonPid(): number | null {
+  try {
+    const content = fs.readFileSync(PID_PATH, "utf-8").trim();
+    const pid = parseInt(content, 10);
+    return Number.isFinite(pid) ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function signalDaemonReload(opts: { verbose: boolean }): void {
+  // Best-effort: if the daemon is running, ask it to reload init.toml.
+  const pid = readDaemonPid();
+  if (pid === null) return;
+  if (!pidAlive(pid)) return;
+
+  try {
+    process.kill(pid, "SIGHUP");
+    if (opts.verbose) console.log("  Signaled daemon to reload config (SIGHUP)");
+  } catch {
+    // ignore
+  }
 }
 
 function ensurePiAvailable(): void {

@@ -200,8 +200,40 @@ function getWebConfig(): { enabled: boolean; port: number } {
 
 async function monitorLoop(): Promise<void> {
   const platform = detectPlatform();
-  const webConfig = getWebConfig();
   let webServer: { url: string; stop: () => void } | null = null;
+  let webPort: number | null = null;
+
+  async function applyWebConfig(next: { enabled: boolean; port: number }): Promise<void> {
+    if (!next.enabled) {
+      if (webServer) {
+        webServer.stop();
+        webServer = null;
+        webPort = null;
+        console.log("Rho web stopped");
+      }
+      return;
+    }
+
+    // Already running on the desired port.
+    if (webServer && webPort === next.port) return;
+
+    // Port changed (or server is missing) → restart.
+    if (webServer) {
+      webServer.stop();
+      webServer = null;
+      webPort = null;
+    }
+
+    try {
+      const { startWebServer } = await import("./web.ts");
+      webServer = startWebServer(next.port);
+      webPort = next.port;
+      console.log(`Rho web running at ${webServer.url}`);
+    } catch (err) {
+      console.error(`Failed to start web server: ${(err as Error).message}`);
+      // Non-fatal - continue without web server
+    }
+  }
 
   writeFileSync(PID_PATH, String(process.pid));
 
@@ -210,16 +242,14 @@ async function monitorLoop(): Promise<void> {
     showNotification(getInterval());
   }
 
-  // Start web server if enabled
-  if (webConfig.enabled) {
-    try {
-      const { startWebServer } = await import("./web.ts");
-      webServer = startWebServer(webConfig.port);
-      console.log(`Rho web running at ${webServer.url}`);
-    } catch (err) {
-      console.error(`Failed to start web server: ${(err as Error).message}`);
-      // Non-fatal - continue without web server
-    }
+  // Start (or stop) web server based on current config.
+  await applyWebConfig(getWebConfig());
+
+  // Reload web config on SIGHUP (used by `rho sync` for immediate apply).
+  if (process.platform !== "win32") {
+    process.on("SIGHUP", () => {
+      void applyWebConfig(getWebConfig());
+    });
   }
 
   const cleanup = () => {
