@@ -363,6 +363,8 @@ async function handleRemove(
   let targetId: string;
   let targetType: string;
 
+  let targetEntry: BrainEntry | undefined;
+
   if (params.id) {
     // Direct id lookup — need to find the type
     const { entries } = readBrain(brainPath);
@@ -373,6 +375,7 @@ async function handleRemove(
     }
     targetId = params.id;
     targetType = existing.type;
+    targetEntry = existing;
   } else if (params.type && KEYED_TYPES[params.type]) {
     // Natural key lookup
     const keyField = KEYED_TYPES[params.type];
@@ -382,6 +385,9 @@ async function handleRemove(
     }
     targetId = deterministicId(params.type, keyValue);
     targetType = params.type;
+    const { entries } = readBrain(brainPath);
+    const brain = foldBrain(entries);
+    targetEntry = findEntryById(brain, targetId);
   } else {
     return { ok: false, message: "remove requires id, or type + natural key" };
   }
@@ -396,7 +402,8 @@ async function handleRemove(
   };
 
   await appendBrainEntry(brainPath, tombstone);
-  return { ok: true, message: `Removed ${targetType} ${targetId}` };
+  const summary = targetEntry ? `: ${entryOneLiner(targetEntry)}` : "";
+  return { ok: true, message: `Removed ${targetType} ${targetId}${summary}` };
 }
 
 // ── List ──────────────────────────────────────────────────────────
