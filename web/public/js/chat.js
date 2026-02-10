@@ -1499,8 +1499,10 @@ document.addEventListener("alpine:init", () => {
         this.allSessionsLoaded = sessions.length >= total;
 
         if (this.activeSessionId) {
-          // Restore from URL hash — load the session
-          await this.selectSession(this.activeSessionId);
+          // Only load session on first load (not on poll refresh)
+          if (showSpinner) {
+            await this.selectSession(this.activeSessionId);
+          }
         } else if (sessions.length > 0) {
           await this.selectSession(sessions[0].id);
         }
@@ -1563,6 +1565,10 @@ document.addEventListener("alpine:init", () => {
       this.streamMessageId = "";
       this.toolCallPartById.clear();
 
+      // Clear stale RPC when switching sessions
+      this.activeRpcSessionId = "";
+      this.activeRpcSessionFile = "";
+
       // Persist in URL for refresh/back
       if (window.location.hash !== `#${sessionId}`) {
         history.replaceState(null, "", `#${sessionId}`);
@@ -1580,7 +1586,7 @@ document.addEventListener("alpine:init", () => {
         // Auto-start RPC for empty sessions so they're immediately usable
         const messageCount = session.stats?.messageCount ?? session.messageCount ?? 0;
         const sessionFile = this.getSessionFile(sessionId);
-        if (messageCount === 0 && sessionFile && !this.activeRpcSessionId) {
+        if (messageCount === 0 && sessionFile) {
           this.startRpcSession(sessionFile);
           this.enterMaximized();
         }
@@ -1592,6 +1598,12 @@ document.addEventListener("alpine:init", () => {
     },
 
     applySession(session) {
+      // Don't overwrite live streaming messages with stale disk data
+      if (this.activeRpcSessionId && (this.isStreaming || this.renderedMessages.length > 0)) {
+        // Update metadata only
+        this.activeSession = { ...this.activeSession, ...session, messages: undefined };
+        return;
+      }
       this.activeSession = session;
 
       // Merge toolResult messages into preceding assistant's tool_call parts
@@ -1730,6 +1742,7 @@ document.addEventListener("alpine:init", () => {
         this.activeSessionId = result.sessionId;
         this.activeRpcSessionId = "";
         this.activeRpcSessionFile = result.sessionFile;
+        history.replaceState(null, "", `#${result.sessionId}`);
         this.promptText = "";
         this.renderedMessages = [];
         this.applySession(result.session);
@@ -1765,6 +1778,7 @@ document.addEventListener("alpine:init", () => {
         this.activeSessionId = forkResult.sessionId;
         this.activeRpcSessionId = "";
         this.activeRpcSessionFile = forkResult.sessionFile;
+        history.replaceState(null, "", `#${forkResult.sessionId}`);
         this.promptText = "";
 
         this.applySession(forkResult.session);
