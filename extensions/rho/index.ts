@@ -1819,6 +1819,19 @@ Instructions:
       }
     }
 
+    // Consolidation suggestion
+    if (!IS_SUBAGENT && ctx.hasUI) {
+      const { entries } = readBrain(BRAIN_PATH);
+      const brain = foldBrain(entries);
+      const lastConsolidation = brain.meta.get("memory.last_consolidation");
+      const lastTs = lastConsolidation ? new Date(lastConsolidation.value).getTime() : 0;
+      const daysSince = (Date.now() - lastTs) / (1000 * 60 * 60 * 24);
+      if (daysSince > 1) {
+        const ago = lastTs === 0 ? "never" : `${Math.floor(daysSince)}d ago`;
+        ctx.ui.notify(`🧹 Memory consolidation available (last: ${ago}). Run /consolidate`, "info");
+      }
+    }
+
     // Heartbeat: restore state, acquire leadership, and schedule
     if (!IS_SUBAGENT) {
       startHeartbeatLeadership(ctx);
@@ -2422,6 +2435,19 @@ Instructions:
       if (stats.tasks) parts.push(`${stats.tasks} tasks`);
       const summary = parts.length ? parts.join(", ") : "nothing new";
       ctx.ui.notify(`✅ Migration complete: ${summary} (${stats.skipped} skipped)`, "success");
+    },
+  });
+
+  // ── Command: /consolidate ────────────────────────────────────────────────────
+
+  pi.registerCommand("consolidate", {
+    description: "Run memory consolidation — deduplicate, merge, and clean stale entries",
+    handler: async (_args, ctx) => {
+      ctx.ui.setEditorText(
+        "Run the memory consolidation SOP from ~/.rho/project/sops/memory-consolidate.sop.md — " +
+        "follow all steps in order. When complete, update the meta entry: " +
+        "brain action=add type=meta key=memory.last_consolidation value=<current ISO timestamp>"
+      );
     },
   });
 
