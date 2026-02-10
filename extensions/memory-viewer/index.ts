@@ -351,9 +351,9 @@ class MemoryViewerComponent {
 	}
 
 	private visibleLines(): number {
-		// Reserve lines for: top border, scroll info, separator, bottom border, help line
-		const extra = this.filterMode ? 1 : 0; // search input line
-		return Math.max(1, process.stdout.rows - 8 - extra);
+		// Reserve lines for: top border, bottom border, optional search input
+		const extra = this.filterMode ? 1 : 0;
+		return Math.max(1, process.stdout.rows - 4 - extra);
 	}
 
 	render(width: number): string[] {
@@ -378,20 +378,26 @@ class MemoryViewerComponent {
 		const dim = (c: string) => th.fg("dim", c);
 		const result: string[] = [];
 
-		// Top border with title
-		const title = ` Memories `;
-		const titleW = visibleWidth(title);
-		const leftPad = Math.floor((innerW - titleW) / 2);
-		const rightPad = innerW - titleW - leftPad;
+		// ── Top border: title + scroll info ──
+		const total = this.allLines.length;
+		const pos = total > 0 ? Math.floor(((this.scrollOffset + visible / 2) / Math.max(1, total)) * 100) : 0;
+		const pct = `${Math.min(pos, 100)}%`;
+		const titleLeft = ` Memories `;
+		const filterTag = (!this.filterMode && this.filterText) ? ` filter: "${this.filterText}" ` : "";
+		const detailTag = this.detailed ? " detailed " : "";
+		const titleRight = ` ${[pct, detailTag, filterTag].filter(Boolean).join("· ").trim()} `;
+		const titleLeftW = visibleWidth(titleLeft);
+		const titleRightW = visibleWidth(titleRight);
+		const fillW = Math.max(0, innerW - titleLeftW - titleRightW);
 		result.push(
 			border("╭") +
-				border("─".repeat(leftPad)) +
-				accent(title) +
-				border("─".repeat(rightPad)) +
+				accent(titleLeft) +
+				border("─".repeat(fillW)) +
+				dim(titleRight) +
 				border("╮"),
 		);
 
-		// Search input line (when filter mode active)
+		// ── Search input (only when filter mode active) ──
 		if (this.filterMode && this.searchInput) {
 			const inputLines = this.searchInput.render(innerW - 4);
 			const inputLine = inputLines[0] || "";
@@ -402,19 +408,7 @@ class MemoryViewerComponent {
 			);
 		}
 
-		// Scroll info line
-		const total = this.allLines.length;
-		const pos = total > 0 ? Math.floor(((this.scrollOffset + visible / 2) / Math.max(1, total)) * 100) : 0;
-		const filterIndicator = (!this.filterMode && this.filterText) ? dim(`  filter: "${this.filterText}"`) : "";
-		const scrollInfo = `${Math.min(pos, 100)}% (${this.scrollOffset + 1}-${Math.min(this.scrollOffset + visible, total)}/${total})`;
-		result.push(
-			border("│") +
-				truncateToWidth(dim(` ${scrollInfo}`) + filterIndicator, innerW, "", true) +
-				border("│"),
-		);
-		result.push(border("├") + border("─".repeat(innerW)) + border("┤"));
-
-		// Content lines
+		// ── Content lines ──
 		const visibleSlice = this.allLines.slice(this.scrollOffset, this.scrollOffset + visible);
 		for (const line of visibleSlice) {
 			result.push(border("│") + truncateToWidth(line, innerW, "…", true) + border("│"));
@@ -425,18 +419,31 @@ class MemoryViewerComponent {
 			result.push(border("│") + " ".repeat(innerW) + border("│"));
 		}
 
-		// Help line
-		result.push(border("├") + border("─".repeat(innerW)) + border("┤"));
-		const detailIndicator = this.detailed ? " [detailed]" : "";
-		const help = this.filterMode
-			? " type to filter  enter keep  esc clear"
-			: ` ↑↓/jk scroll  PgUp/Dn page  g/G top/bottom  Tab section  / search  d detail  r refresh  Esc close${detailIndicator}`;
+		// ── Bottom border: keybind hints ──
+		const hint = (key: string, desc: string) => th.fg("dim", key) + th.fg("muted", " " + desc);
+		const sep = th.fg("border", " · ");
+
+		const hints = this.filterMode
+			? [hint("type", "filter"), hint("enter", "keep"), hint("esc", "clear")]
+			: [
+					hint("↑↓ jk", "scroll"),
+					hint("PgUp/Dn", "page"),
+					hint("g/G", "top/end"),
+					hint("Tab", "section"),
+					hint("/", "search"),
+					hint("d", "detail"),
+					hint("r", "refresh"),
+					hint("Esc", "close"),
+				];
+		const hintsStr = " " + hints.join(sep) + " ";
+		const hintsW = visibleWidth(hintsStr);
+		const hintFill = Math.max(0, innerW - hintsW);
 		result.push(
-			border("│") +
-				truncateToWidth(dim(help), innerW, "", true) +
-				border("│"),
+			border("╰") +
+				hintsStr +
+				border("─".repeat(hintFill)) +
+				border("╯"),
 		);
-		result.push(border("╰") + border("─".repeat(innerW)) + border("╯"));
 
 		return result;
 	}
