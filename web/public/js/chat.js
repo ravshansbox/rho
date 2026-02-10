@@ -245,6 +245,12 @@ function normalizeParts(content) {
         }
       }
     }
+    // Mark any remaining tool_calls without results as "done" (historical data, not running)
+    for (const call of toolCalls) {
+      if (call.status === "running") {
+        call.status = "done";
+      }
+    }
     // Return tool_calls and other parts, excluding tool_result (merged into calls)
     return [...toolCalls, ...otherParts];
   }

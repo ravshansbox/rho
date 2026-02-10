@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import app, { disposeServerResources, injectWebSocket } from "./server.ts";
 
 const port = 3141;
-const hostname = "127.0.0.1";
+const hostname = "0.0.0.0";
 
 const server = serve({ fetch: app.fetch, port, hostname });
 injectWebSocket(server);

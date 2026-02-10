@@ -675,7 +675,8 @@ button { font: inherit; }
   transition: opacity 0.15s ease;
 }
 
-.chat-message:hover .chat-fork-button {
+.chat-message:hover .chat-fork-button,
+.chat-fork-button:focus {
   opacity: 1;
 }
 
