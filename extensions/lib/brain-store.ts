@@ -131,8 +131,8 @@ export const SCHEMA_REGISTRY: Record<
 
 // ── Constants ─────────────────────────────────────────────────────
 
-const BRAIN_DIR = path.join(os.homedir(), ".rho", "brain");
-const BRAIN_PATH = path.join(BRAIN_DIR, "brain.jsonl");
+const BRAIN_DIR = process.env.RHO_BRAIN_DIR ?? path.join(os.homedir(), ".rho", "brain");
+const BRAIN_PATH = process.env.RHO_BRAIN_PATH ?? path.join(BRAIN_DIR, "brain.jsonl");
 
 export { BRAIN_DIR, BRAIN_PATH };
 
