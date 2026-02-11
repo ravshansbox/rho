@@ -1,0 +1,38 @@
+# Reproduce: rho start fails with "tmux session not found" on fresh npm install
+#
+# Usage:
+#   docker build --network=host -t rho-start-bug -f tests/e2e/Dockerfile.start-bug .
+#   docker run --rm rho-start-bug
+
+FROM docker.io/library/node:22-bookworm
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tmux git procps \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -m -s /bin/bash tester
+USER tester
+WORKDIR /home/tester
+
+RUN mkdir -p /home/tester/.npm-global \
+    && npm config set prefix /home/tester/.npm-global
+ENV PATH="/home/tester/.local/bin:/home/tester/.npm-global/bin:${PATH}"
+ENV HOME=/home/tester
+ENV NODE_NO_WARNINGS=1
+
+# Install pi globally
+RUN npm install -g @mariozechner/pi-coding-agent
+
+# Copy the repo (for the fixed version)
+USER root
+COPY --chown=tester:tester . /home/tester/rho
+USER tester
+
+# Install rho from the local copy (npm pack + install)
+RUN cd /home/tester/rho && npm pack --quiet 2>&1 | tail -1 \
+    && npm install -g ./rhobot-dev-rho-*.tgz
+
+# Pre-init
+RUN rho init --name test-agent
+
+CMD ["bash", "/home/tester/rho/tests/e2e/test-start-bug.sh"]

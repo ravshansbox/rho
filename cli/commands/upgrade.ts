@@ -142,9 +142,15 @@ Options:
     console.log("Running rho sync...");
 
     // Spawn a fresh process to ensure we run the on-disk CLI (post-upgrade).
-    // Use the rho.mjs shim (not index.ts directly) so it works from node_modules.
+    // --experimental-strip-types fails inside node_modules, so use rho.mjs there.
+    const indexPath = path.join(pkgRoot, "cli", "index.ts");
     const shimPath = path.join(pkgRoot, "cli", "rho.mjs");
-    const r = spawnSync(process.execPath, [shimPath, "sync"], {
+    const insideNodeModules = pkgRoot.includes("node_modules");
+    const nodeMajor = parseInt(process.version.slice(1), 10);
+    const syncArgs = (nodeMajor >= 22 && !insideNodeModules)
+      ? ["--experimental-strip-types", "--no-warnings", indexPath, "sync"]
+      : [shimPath, "sync"];
+    const r = spawnSync(process.execPath, syncArgs, {
       stdio: "inherit",
       env: { ...process.env },
     });

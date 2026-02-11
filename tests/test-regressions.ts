@@ -95,6 +95,22 @@ console.log("\n=== Issue #7: pi PATH resolution (rho start / doctor) ===\n");
     /set-environment.*PATH/,
     "#7 start: propagates PATH to tmux server environment",
   );
+
+  // Detached monitor must detect node_modules to avoid
+  // ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING (Node 22+ refuses
+  // --experimental-strip-types for files inside node_modules).
+  assertMatch(
+    startSrc,
+    /node_modules/,
+    "#7 start: detects node_modules for strip-types guard",
+  );
+
+  // When inside node_modules, must use rho.mjs shim (not --experimental-strip-types)
+  assertMatch(
+    startSrc,
+    /insideNodeModules/,
+    "#7 start: insideNodeModules flag controls shim vs strip-types",
+  );
 }
 
 {

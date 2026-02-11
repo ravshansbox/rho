@@ -394,23 +394,43 @@ Options:
     return;
   }
 
-  // Use the rho.mjs shim (not index.ts directly) so it works from node_modules.
-  const shimPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "rho.mjs");
-  const child = spawn(process.execPath, [
-    shimPath,
-    "start",
-    "--monitor",
-  ], {
+  // Spawn the detached monitor process.
+  //
+  // Node's --experimental-strip-types refuses to work on files inside
+  // node_modules (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING), so for npm
+  // installs we must use the rho.mjs shim (which loads tsx to handle TS).
+  // For dev/git-clone installs (outside node_modules), strip-types works and
+  // avoids the tsx dependency.
+  const cliDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const indexPath = path.join(cliDir, "index.ts");
+  const shimPath = path.join(cliDir, "rho.mjs");
+
+  const insideNodeModules = cliDir.includes("node_modules");
+  const nodeMajor = parseInt(process.version.slice(1), 10);
+  const canStripTypes = nodeMajor >= 22 && !insideNodeModules;
+
+  const childArgs = canStripTypes
+    ? ["--experimental-strip-types", "--no-warnings", indexPath, "start", "--monitor"]
+    : [shimPath, "start", "--monitor"];
+
+  const child = spawn(process.execPath, childArgs, {
     detached: true,
     stdio: "ignore",
     env: { ...process.env },
   });
   child.unref();
 
-  await sleep(1000);
+  // Wait for the monitor to create the tmux session.  Retry a few times —
+  // on slower systems (VPS, cold npm cache) it can take more than 1 second.
+  let started = false;
+  for (let i = 0; i < 5; i++) {
+    await sleep(1000);
+    if (tmuxSessionExists()) { started = true; break; }
+  }
 
-  if (!tmuxSessionExists()) {
-    console.error("Failed to start rho daemon (tmux session not found).");
+  if (!started) {
+    console.error("Failed to start rho daemon (tmux session not found after 5s).");
+    console.error("Check that pi is installed and on PATH: which pi");
     process.exit(1);
   }
 
