@@ -20,7 +20,7 @@
     <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/common.min.js"></script>
     <script src="/js/app.js?v=20260210v" defer></script>
     <script src="/js/chat.js?v=20260210v" defer></script>
-    <script src="/js/files.js?v=20260210v" defer></script>
+    <script src="/js/config.js?v=20260210v" defer>
     <script src="/js/memory.js?v=20260210v" defer></script>
     <script src="/js/tasks.js?v=20260210v" defer></script>
     <script src="https://unpkg.com/alpinejs@3.13.5/dist/cdn.min.js" defer></script>
@@ -44,16 +44,6 @@
             </button>
             <button
               class="nav-tab"
-              :class="{ active: view === 'files' }"
-              @click="setView('files')"
-              type="button"
-              role="tab"
-              :aria-selected="view === 'files'"
-            >
-              Files
-            </button>
-            <button
-              class="nav-tab"
               :class="{ active: view === 'memory' }"
               @click="setView('memory')"
               type="button"
@@ -71,6 +61,16 @@
               :aria-selected="view === 'tasks'"
             >
               Tasks
+            </button>
+            <button
+              class="nav-tab nav-tab-icon"
+              :class="{ active: view === 'config' }"
+              @click="setView('config')"
+              type="button"
+              role="tab"
+              :aria-selected="view === 'config'"
+            >
+              <span>&#x2699;</span>
             </button>
           </div>
         </div>
@@ -457,89 +457,35 @@
           </div>
         </section>
 
-        <section class="view files-view" x-show="view === 'files'" x-cloak role="tabpanel">
-          <div class="view-header">// files</div>
-          <div class="view-title">State files</div>
-          <div class="view-body" x-data="rhoFiles()" x-init="init()">
-            <div class="files-layout">
-              <!-- Mobile toggle for files -->
-              <button
-                class="mobile-panel-toggle"
-                type="button"
-                @click="toggleFilesPanel()"
-                :aria-expanded="showFilesPanel"
-              >
-                <span class="mobile-panel-toggle-label">
-                  <span x-text="activeFile ? activeFile.name : 'Files'"></span>
-                  <span class="mobile-panel-toggle-count" x-text="files.length + ' file' + (files.length === 1 ? '' : 's')"></span>
-                </span>
-                <span class="mobile-panel-toggle-arrow">&#x25BC;</span>
-              </button>
-              <aside class="files-panel" :class="{ collapsed: !showFilesPanel }">
-                <div class="files-panel-header">
-                  <div class="files-section-title">Files</div>
-                  <button class="btn btn-ghost" type="button" @click="loadFiles()">Refresh</button>
+        <section class="view config-view" x-show="view === 'config'" x-cloak role="tabpanel">
+          <div class="view-header">// config</div>
+          <div class="view-title">init.toml</div>
+          <div class="view-body" x-data="rhoConfig()" x-init="init()">
+            <div class="config-layout">
+              <div class="config-header">
+                <div>
+                  <div class="config-filename">init.toml</div>
+                  <div class="config-path" x-text="filePath"></div>
                 </div>
-                <div class="files-section-meta" x-show="isLoadingFiles">Loading files...</div>
-                <div class="files-section-meta files-error" x-show="error" x-text="error"></div>
-                <div class="files-list">
-                  <template x-for="file in files" :key="file.path">
-                    <button
-                      class="file-item"
-                      :class="{ active: file.path === activeFilePath, disabled: file.isDirectory === true }"
-                      type="button"
-                      @click="selectFile(file)"
-                      :disabled="file.isDirectory === true"
-                    >
-                      <div class="file-item-main">
-                        <div class="file-name" x-text="file.name"></div>
-                        <div class="file-meta">
-                          <span class="file-badge" :class="`cat-${file.category}`" x-text="file.category"></span>
-                          <span class="file-kind" x-show="file.isDirectory">dir</span>
-                        </div>
-                      </div>
-                      <div class="file-time" x-text="formatTimestamp(file.lastModified)"></div>
-                    </button>
-                  </template>
-                  <div class="files-empty" x-show="!isLoadingFiles && files.length === 0">
-                    No files found.
-                  </div>
+                <div class="config-actions">
+                  <div class="config-status" :class="{ saved: saveStatus === 'saved', error: saveStatus === 'error' }" x-text="statusMessage()"></div>
+                  <button
+                    class="btn"
+                    type="button"
+                    @click="save()"
+                    :disabled="!dirty || isSaving"
+                  >
+                    Save
+                  </button>
                 </div>
-              </aside>
-
-              <section class="files-editor">
-                <div class="files-editor-header">
-                  <div>
-                    <div class="files-editor-title" x-text="activeFile ? activeFile.name : 'Select a file'"></div>
-                    <div class="files-editor-path" x-show="activeFile" x-text="activeFile?.path"></div>
-                  </div>
-                  <div class="files-editor-actions">
-                    <div class="files-editor-status" :class="{ saved: saveStatus === 'saved', error: saveStatus === 'error', warn: conflict }" x-text="statusMessage()"></div>
-                    <button
-                      class="btn"
-                      type="button"
-                      @click="saveFile()"
-                      :disabled="!activeFile || activeFile.isDirectory || !dirty || isSaving"
-                    >
-                      Save
-                    </button>
-                  </div>
-                </div>
-
-                <div class="files-alert" x-show="conflict">
-                  External update detected. Reload to see the latest changes.
-                  <button class="btn btn-ghost" type="button" @click="applyExternalUpdate()">Reload</button>
-                  <button class="btn btn-ghost" type="button" @click="dismissConflict()">Dismiss</button>
-                </div>
-
-                <textarea
-                  class="files-textarea"
-                  x-model="content"
-                  @input="handleInput"
-                  :readonly="!activeFile || activeFile.isDirectory"
-                  placeholder="Select a file to view its contents."
-                ></textarea>
-              </section>
+              </div>
+              <div class="config-error" x-show="error" x-text="error"></div>
+              <textarea
+                class="config-textarea"
+                x-model="content"
+                @input="handleInput()"
+                placeholder="Loading..."
+              ></textarea>
             </div>
           </div>
         </section>
