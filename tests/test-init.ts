@@ -157,29 +157,6 @@ console.log("\n=== generateInitToml ===\n");
 }
 
 
-// ===== generateSoulMd tests =====
-console.log("\n=== generateSoulMd ===\n");
-
-{
-  const result = generateSoulMd("tau");
-  assert(typeof result === "string", "returns a string");
-  assert(result.length > 50, "output is non-trivial");
-
-  // Has the agent name in it
-  assertIncludes(result, "tau", "contains agent name");
-
-  // Has key sections from template
-  assertIncludes(result, "## Who I Am", "has Who I Am section");
-  assertIncludes(result, "## Worldview", "has Worldview section");
-  assertIncludes(result, "## Voice", "has Voice section");
-
-  // Different name produces different output
-  const other = generateSoulMd("atlas");
-  assertIncludes(other, "atlas", "different name is substituted");
-  assertNotIncludes(other, "tau", "old name not present in new output");
-}
-
-
 // ===== planInit tests =====
 console.log("\n=== planInit ===\n");
 

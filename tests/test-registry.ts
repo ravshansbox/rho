@@ -121,10 +121,12 @@ console.log("\n-- non-core modules are not alwaysOn --");
 // ================================================================
 console.log("\n-- coverage: all extensions mapped --");
 {
-  // Get actual extension dirs (excluding lib/)
+  // Get actual extension dirs (excluding lib/ and non-standalone extensions)
+  // review is loaded by the rho extension, not registered separately.
+  const EXT_SKIP = new Set(["lib", "review"]);
   const extDir = path.join(PKG_ROOT, "extensions");
   const actualExtensions = fs.readdirSync(extDir)
-    .filter((d) => d !== "lib" && fs.statSync(path.join(extDir, d)).isDirectory())
+    .filter((d) => !EXT_SKIP.has(d) && fs.statSync(path.join(extDir, d)).isDirectory())
     .map((d) => `extensions/${d}`);
 
   const registeredExtensions = new Set<string>();
@@ -141,9 +143,11 @@ console.log("\n-- coverage: all extensions mapped --");
 
 console.log("\n-- coverage: all skills mapped --");
 {
+  // memory-migration is a transitional skill, not a permanent registry entry.
+  const SKILL_SKIP = new Set(["memory-migration"]);
   const skillsDir = path.join(PKG_ROOT, "skills");
   const actualSkills = fs.readdirSync(skillsDir)
-    .filter((d) => fs.statSync(path.join(skillsDir, d)).isDirectory())
+    .filter((d) => !SKILL_SKIP.has(d) && fs.statSync(path.join(skillsDir, d)).isDirectory())
     .map((d) => `skills/${d}`);
 
   const registeredSkills = new Set<string>();

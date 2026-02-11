@@ -197,7 +197,7 @@ console.log("\n=== countModules ===\n");
 {
   const config = makeConfig();
   const counts = countModules(config);
-  assertEq(counts.enabled, 10, "all 10 modules enabled");
+  assertEq(counts.enabled, 9, "all 9 modules enabled");
   assertEq(counts.disabled, 0, "0 disabled");
 }
 
@@ -208,7 +208,7 @@ console.log("\n=== countModules ===\n");
   });
   const counts = countModules(config);
   assertEq(counts.enabled, 8, "8 enabled");
-  assertEq(counts.disabled, 2, "2 disabled");
+  assertEq(counts.disabled, 1, "1 disabled");
 }
 
 {
@@ -221,7 +221,7 @@ console.log("\n=== countModules ===\n");
   });
   const counts = countModules(config);
   assertEq(counts.enabled, 2, "only core enabled");
-  assertEq(counts.disabled, 8, "8 disabled");
+  assertEq(counts.disabled, 7, "7 disabled");
 }
 
 {
@@ -307,7 +307,7 @@ console.log("\n=== formatStatus ===\n");
   assert(output.includes("platform: android"), "shows platform");
   assert(output.includes("Heartbeat: running"), "shows running state");
   assert(output.includes("next:"), "shows next check-in when available");
-  assert(output.includes("10 enabled"), "shows enabled count");
+  assert(output.includes("9 enabled"), "shows enabled count");
   assert(output.includes("heartbeat ✓"), "shows modules");
   assert(output.includes("Recent output"), "shows pane output header");
   assert(output.includes("Last heartbeat: ok"), "shows pane content");
@@ -362,7 +362,7 @@ console.log("\n=== formatStatus ===\n");
     paneOutput: null,
   };
   const output = formatStatus(info);
-  assert(output.includes("8 enabled, 2 disabled"), "shows disabled count");
+  assert(output.includes("8 enabled, 1 disabled"), "shows disabled count");
 }
 
 {
@@ -477,7 +477,7 @@ console.log("\n=== Edge cases ===\n");
     paneOutput: null,
   };
   const output = formatStatus(info);
-  assert(output.includes("2 enabled, 8 disabled"), "mostly disabled status");
+  assert(output.includes("2 enabled, 7 disabled"), "mostly disabled status");
   assert(output.includes("vault ✗"), "vault shown as disabled");
 }
 
