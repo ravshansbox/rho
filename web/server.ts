@@ -143,16 +143,15 @@ async function loadPiSessionManagerModule(): Promise<{
       }
 
       const homeDir = process.env.HOME ?? "";
-      const fallbackPath = path.join(
-        homeDir,
-        ".npm-global",
-        "lib",
-        "node_modules",
-        "@mariozechner",
-        "pi-coding-agent",
-        "dist",
-        "index.js"
-      );
+      // Resolve actual npm prefix (supports nvm), fall back to ~/.npm-global
+      let prefix = path.join(homeDir, ".npm-global");
+      try {
+        const { execSync } = await import("child_process");
+        prefix = execSync("npm config get prefix", { encoding: "utf-8" }).trim();
+      } catch {
+        // npm not available, use default prefix
+      }
+      const fallbackPath = path.join(prefix, "lib", "node_modules", "@mariozechner", "pi-coding-agent", "dist", "index.js");
       const mod = await import(pathToFileURL(fallbackPath).href);
       if (!mod?.SessionManager) {
         throw new Error("SessionManager export not found in pi-coding-agent module");
