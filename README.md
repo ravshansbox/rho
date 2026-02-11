@@ -33,6 +33,16 @@ curl -fsSL https://raw.githubusercontent.com/mikeyobrien/rho/main/SKILL.md -o /t
 
 The agent handles platform detection, dependency installation, and config bootstrapping interactively.
 
+### npm
+
+```bash
+npm install -g @rhobot-dev/rho
+rho init && rho sync
+rho login && rho start
+```
+
+Prerequisites: Node.js (18+), tmux, git.
+
 ### macOS / Linux
 
 ```bash
