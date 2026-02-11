@@ -331,13 +331,13 @@ app.delete("/api/tasks/:id", async (c) => {
 async function readMemoryEntries() {
   const { entries } = readBrain(BRAIN_PATH);
   const brain = foldBrain(entries);
-  return { learnings: brain.learnings, preferences: brain.preferences };
+  return { learnings: brain.learnings, preferences: brain.preferences, tasks: brain.tasks, reminders: brain.reminders };
 }
 
 app.get("/api/memory", async (c) => {
   try {
-    const { learnings, preferences } = await readMemoryEntries();
-    const allEntries = [...learnings, ...preferences];
+    const { learnings, preferences, tasks, reminders } = await readMemoryEntries();
+    const allEntries = [...learnings, ...preferences, ...tasks, ...reminders];
 
     const typeFilter = c.req.query("type");
     const categoryFilter = c.req.query("category");
@@ -347,7 +347,7 @@ app.get("/api/memory", async (c) => {
     if (typeFilter) filtered = filtered.filter(e => e.type === typeFilter);
     if (categoryFilter) filtered = filtered.filter(e => (e as any).category === categoryFilter);
     if (q) filtered = filtered.filter(e => {
-      const text = (e as any).text || "";
+      const text = (e as any).text || (e as any).description || "";
       const cat = (e as any).category || "";
       return text.toLowerCase().includes(q) || cat.toLowerCase().includes(q);
     });
@@ -358,6 +358,8 @@ app.get("/api/memory", async (c) => {
       total: allEntries.length,
       learnings: learnings.length,
       preferences: preferences.length,
+      tasks: tasks.length,
+      reminders: reminders.length,
       categories,
       entries: filtered,
     });
@@ -372,7 +374,7 @@ app.delete("/api/memory/:id", async (c) => {
     // Find the entry to determine its type
     const { entries } = readBrain(BRAIN_PATH);
     const brain = foldBrain(entries);
-    const allMemory = [...brain.learnings, ...brain.preferences];
+    const allMemory = [...brain.learnings, ...brain.preferences, ...brain.tasks, ...brain.reminders];
     const target = allMemory.find(e => e.id === entryId);
     if (!target) return c.json({ error: "Entry not found" }, 404);
 

@@ -2,13 +2,17 @@ document.addEventListener("alpine:init", () => {
   Alpine.data("rhoMemory", () => ({
     entries: [],
     displayEntries: [],
-    stats: { total: 0, learnings: 0, preferences: 0, categories: [] },
+    stats: { total: 0, learnings: 0, preferences: 0, tasks: 0, reminders: 0, categories: [] },
     typeFilter: "all",
     categoryFilter: "",
     searchQuery: "",
     sortBy: "created",
     isLoading: false,
     error: "",
+
+    // Task creation state
+    newTaskDescription: "",
+    newTaskPriority: "normal",
 
     async init() {
       console.log('[rho-memory] init called');
@@ -25,8 +29,11 @@ document.addEventListener("alpine:init", () => {
         switch (this.sortBy) {
           case "used":
             return (b.used || 0) - (a.used || 0);
-          case "alpha":
-            return a.text.localeCompare(b.text);
+          case "alpha": {
+            const aText = a.text || a.description || "";
+            const bText = b.text || b.description || "";
+            return aText.localeCompare(bText);
+          }
           case "last_used":
             return (b.last_used || "").localeCompare(a.last_used || "");
           case "created":
@@ -57,6 +64,8 @@ document.addEventListener("alpine:init", () => {
           total: data.total,
           learnings: data.learnings,
           preferences: data.preferences,
+          tasks: data.tasks ?? 0,
+          reminders: data.reminders ?? 0,
           categories: data.categories,
         };
         this.updateDisplay();
@@ -81,7 +90,7 @@ document.addEventListener("alpine:init", () => {
     },
 
     async remove(entry) {
-      if (!confirm(`Delete memory entry?\n\n"${entry.text.substring(0, 100)}..."`)) return;
+      if (!confirm(`Delete memory entry?\n\n"${(entry.text || entry.description || "").substring(0, 100)}..."`)) return;
       try {
         const res = await fetch(`/api/memory/${encodeURIComponent(entry.id)}`, { method: "DELETE" });
         if (!res.ok) {
@@ -91,6 +100,65 @@ document.addEventListener("alpine:init", () => {
         await this.load();
       } catch (err) {
         this.error = err.message || "Failed to delete entry";
+      }
+    },
+
+    // ── Task methods ──
+
+    async addTask() {
+      const desc = this.newTaskDescription.trim();
+      if (!desc) return;
+      this.error = "";
+      try {
+        const res = await fetch("/api/tasks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ description: desc, priority: this.newTaskPriority }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || "Failed to add task");
+        }
+        this.newTaskDescription = "";
+        this.newTaskPriority = "normal";
+        await this.load();
+      } catch (err) {
+        this.error = err.message || "Failed to add task";
+      }
+    },
+
+    async toggleTask(task) {
+      if (!task) return;
+      const nextStatus = task.status === "done" ? "pending" : "done";
+      this.error = "";
+      try {
+        const res = await fetch(`/api/tasks/${task.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: nextStatus }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || "Failed to update task");
+        }
+        await this.load();
+      } catch (err) {
+        this.error = err.message || "Failed to toggle task";
+      }
+    },
+
+    async removeTask(task) {
+      if (!task) return;
+      this.error = "";
+      try {
+        const res = await fetch(`/api/tasks/${task.id}`, { method: "DELETE" });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || "Failed to delete task");
+        }
+        await this.load();
+      } catch (err) {
+        this.error = err.message || "Failed to delete task";
       }
     },
   }));
