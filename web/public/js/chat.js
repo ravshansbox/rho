@@ -707,8 +707,12 @@ document.addEventListener("alpine:init", () => {
       // Sync hash on back/forward
       window.addEventListener("hashchange", () => {
         const id = window.location.hash.replace("#", "").trim();
-        if (id && id !== this.activeSessionId) {
-          this.selectSession(id);
+        if (!id) {
+          this.clearSelectedSession();
+          return;
+        }
+        if (id !== this.activeSessionId) {
+          this.selectSession(id, { updateHash: false });
         }
       });
     },
@@ -1501,10 +1505,11 @@ document.addEventListener("alpine:init", () => {
         if (this.activeSessionId) {
           // Only load session on first load (not on poll refresh)
           if (showSpinner) {
-            await this.selectSession(this.activeSessionId);
+            await this.selectSession(this.activeSessionId, { updateHash: false });
           }
-        } else if (sessions.length > 0) {
-          await this.selectSession(sessions[0].id);
+        } else if (showSpinner && sessions.length > 0) {
+          // Auto-select latest on first load, but don't rewrite the URL.
+          await this.selectSession(sessions[0].id, { updateHash: false });
         }
       } catch (error) {
         this.error = error.message ?? "Failed to load sessions";
@@ -1554,10 +1559,35 @@ document.addEventListener("alpine:init", () => {
       this.showSessionsPanel = !this.showSessionsPanel;
     },
 
-    async selectSession(sessionId) {
+    clearSelectedSession() {
+      this.activeSessionId = "";
+      this.activeSession = null;
+      this.renderedMessages = [];
+      this.streamMessageId = "";
+      this.error = "";
+      this.isLoadingSession = false;
+      this.toolCallPartById.clear();
+
+      // Clear stale RPC + exit fullscreen
+      this.activeRpcSessionId = "";
+      this.activeRpcSessionFile = "";
+      this.exitMaximized();
+
+      // Clear URL hash
+      if (window.location.hash) {
+        history.replaceState(null, "", window.location.pathname + window.location.search);
+      }
+
+      // Keep sessions panel visible
+      this.showSessionsPanel = true;
+    },
+
+    async selectSession(sessionId, options = {}) {
       if (!sessionId) {
         return;
       }
+
+      const updateHash = options.updateHash !== false;
 
       this.activeSessionId = sessionId;
       this.isLoadingSession = true;
@@ -1569,8 +1599,8 @@ document.addEventListener("alpine:init", () => {
       this.activeRpcSessionId = "";
       this.activeRpcSessionFile = "";
 
-      // Persist in URL for refresh/back
-      if (window.location.hash !== `#${sessionId}`) {
+      // Persist in URL for refresh/back (optional)
+      if (updateHash && window.location.hash !== `#${sessionId}`) {
         history.replaceState(null, "", `#${sessionId}`);
       }
 

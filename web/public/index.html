@@ -148,6 +148,16 @@
                     <button
                       class="btn btn-ghost"
                       type="button"
+                      @click="clearSelectedSession()"
+                      x-show="activeSessionId"
+                      :disabled="isStreaming || isForking"
+                      title="Clear session selection"
+                    >
+                      Clear
+                    </button>
+                    <button
+                      class="btn btn-ghost"
+                      type="button"
                       @click="forkFromLatest()"
                       :disabled="!activeSession || !hasForkPoints() || isForking"
                     >
