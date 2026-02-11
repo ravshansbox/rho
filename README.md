@@ -24,7 +24,15 @@ rho init && rho sync
 rho login && rho start
 ```
 
-Prerequisites: Node.js (18+), tmux, git.
+### pi
+
+```bash
+pi install npm:@rhobot-dev/rho
+rho init && rho sync
+rho login && rho start
+```
+
+Prerequisites for both: Node.js (18+), tmux, git.
 
 ### macOS / Linux
 
