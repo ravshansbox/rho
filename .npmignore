@@ -1,0 +1,38 @@
+# ── Dev / CI ──────────────────────────────────────────────
+.agents/
+.github/
+.dockerignore
+tests/
+features/
+specs/
+
+# ── Build artifacts & packaging ───────────────────────────
+apt/
+tmp/
+node_modules/
+
+# ── Orchestrator configs ──────────────────────────────────
+ralph*.yml
+
+# ── Large docs (GIFs, casts, logo) ───────────────────────
+docs/*.gif
+docs/*.cast
+docs/*.png
+
+# ── Tasker XML (users generate via skill) ─────────────────
+tasker/
+
+# ── Personal extension ────────────────────────────────────
+extensions/moltbook-viewer/
+
+# ── Review extension test files ───────────────────────────
+extensions/review/*.test.ts
+extensions/review/package.json
+extensions/review/package-lock.json
+
+# ── Stale ralph state in skills ───────────────────────────
+skills/**/.ralph/
+
+# ── Root-level project skill (not a pi skill) ────────────
+SKILL.md
+AGENTS.md
