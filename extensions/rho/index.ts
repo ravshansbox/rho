@@ -1941,10 +1941,10 @@ Instructions:
 
       if (omitted > 0) {
         const ago = lastTs === 0 ? "never" : `${Math.floor(daysSince)}d ago`;
-        ctx.ui.notify(`🧹 ${omitted} entries over budget (last consolidation: ${ago}). Try /sop:memory-consolidate`, "warning");
+        ctx.ui.notify(`🧹 ${omitted} entries over budget (last consolidation: ${ago}). Ask the agent to run the memory-clean skill`, "warning");
       } else if (daysSince > 1) {
         const ago = lastTs === 0 ? "never" : `${Math.floor(daysSince)}d ago`;
-        ctx.ui.notify(`🧹 Memory consolidation available (last: ${ago}). Try /sop:memory-consolidate`, "info");
+        ctx.ui.notify(`🧹 Memory consolidation available (last: ${ago}). Ask the agent to run the memory-clean skill`, "info");
       }
     }
 
