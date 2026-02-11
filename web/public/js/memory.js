@@ -2,7 +2,11 @@ document.addEventListener("alpine:init", () => {
   Alpine.data("rhoMemory", () => ({
     entries: [],
     displayEntries: [],
-    stats: { total: 0, learnings: 0, preferences: 0, categories: [] },
+    stats: {
+      total: 0, behaviors: 0, identity: 0, user: 0,
+      learnings: 0, preferences: 0, contexts: 0,
+      tasks: 0, reminders: 0, categories: [],
+    },
     typeFilter: "all",
     categoryFilter: "",
     searchQuery: "",
@@ -20,13 +24,39 @@ document.addEventListener("alpine:init", () => {
       this.load();
     },
 
+    cardText(entry) {
+      switch (entry.type) {
+        case "behavior":
+          return entry.text || "";
+        case "identity":
+        case "user":
+          return entry.value || "";
+        case "learning":
+          return entry.text || "";
+        case "preference":
+          return entry.text || "";
+        case "context":
+          return (entry.path ? entry.path + ": " : "") + (entry.content || "");
+        case "task":
+          return entry.description || "";
+        case "reminder":
+          return (entry.text || entry.description || "") +
+            (entry.cadence ? " [" + (entry.cadence.kind === "interval" ? "every " + entry.cadence.every : "daily @ " + entry.cadence.at) + "]" : "");
+        default:
+          return entry.text || entry.value || entry.description || entry.content || JSON.stringify(entry);
+      }
+    },
+
     updateDisplay() {
       const sorted = [...this.entries].sort((a, b) => {
         switch (this.sortBy) {
           case "used":
             return (b.used || 0) - (a.used || 0);
-          case "alpha":
-            return a.text.localeCompare(b.text);
+          case "alpha": {
+            const aText = this.cardText(a);
+            const bText = this.cardText(b);
+            return aText.localeCompare(bText);
+          }
           case "last_used":
             return (b.last_used || "").localeCompare(a.last_used || "");
           case "created":
@@ -55,14 +85,20 @@ document.addEventListener("alpine:init", () => {
         this.entries = data.entries;
         this.stats = {
           total: data.total,
+          behaviors: data.behaviors,
+          identity: data.identity,
+          user: data.user,
           learnings: data.learnings,
           preferences: data.preferences,
+          contexts: data.contexts,
+          tasks: data.tasks,
+          reminders: data.reminders,
           categories: data.categories,
         };
         this.updateDisplay();
         console.log('[rho-memory] loaded', this.entries.length, 'entries, display:', this.displayEntries.length);
       } catch (err) {
-        this.error = err.message || "Failed to load memory";
+        this.error = err.message || "Failed to load brain";
         console.error('[rho-memory] load error:', err);
       } finally {
         this.isLoading = false;
@@ -81,7 +117,8 @@ document.addEventListener("alpine:init", () => {
     },
 
     async remove(entry) {
-      if (!confirm(`Delete memory entry?\n\n"${entry.text.substring(0, 100)}..."`)) return;
+      const preview = this.cardText(entry).substring(0, 100);
+      if (!confirm(`Delete brain entry?\n\n"${preview}..."`)) return;
       try {
         const res = await fetch(`/api/memory/${encodeURIComponent(entry.id)}`, { method: "DELETE" });
         if (!res.ok) {

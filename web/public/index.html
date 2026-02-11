@@ -60,7 +60,7 @@
               role="tab"
               :aria-selected="view === 'memory'"
             >
-              Memory
+              Brain
             </button>
             <button
               class="nav-tab"
@@ -545,8 +545,8 @@
         </section>
 
         <section class="view memory-view" x-show="view === 'memory'" x-cloak role="tabpanel">
-          <div class="view-header">// memory</div>
-          <div class="view-title">Agent memory</div>
+          <div class="view-header">// brain</div>
+          <div class="view-title">Agent brain</div>
           <div class="view-body" x-data="rhoMemory()" x-init="init()">
             <div class="memory-stats">
               <span class="memory-stat">
@@ -561,13 +561,31 @@
                 <span class="memory-stat-value preference" x-text="stats.preferences">0</span>
                 <span class="memory-stat-label">preferences</span>
               </span>
+              <span class="memory-stat">
+                <span class="memory-stat-value behavior" x-text="stats.behaviors">0</span>
+                <span class="memory-stat-label">behaviors</span>
+              </span>
+              <span class="memory-stat">
+                <span class="memory-stat-value task" x-text="stats.tasks">0</span>
+                <span class="memory-stat-label">tasks</span>
+              </span>
+              <span class="memory-stat">
+                <span class="memory-stat-value reminder" x-text="stats.reminders">0</span>
+                <span class="memory-stat-label">reminders</span>
+              </span>
             </div>
 
             <div class="memory-controls">
               <div class="memory-filters">
                 <button class="memory-filter-btn" :class="{ active: typeFilter === 'all' }" type="button" @click="setType('all')">All</button>
-                <button class="memory-filter-btn" :class="{ active: typeFilter === 'learning' }" type="button" @click="setType('learning')">Learnings</button>
-                <button class="memory-filter-btn" :class="{ active: typeFilter === 'preference' }" type="button" @click="setType('preference')">Preferences</button>
+                <button class="memory-filter-btn" :class="{ active: typeFilter === 'behavior' }" type="button" @click="setType('behavior')">Behavior</button>
+                <button class="memory-filter-btn" :class="{ active: typeFilter === 'identity' }" type="button" @click="setType('identity')">Identity</button>
+                <button class="memory-filter-btn" :class="{ active: typeFilter === 'user' }" type="button" @click="setType('user')">User</button>
+                <button class="memory-filter-btn" :class="{ active: typeFilter === 'learning' }" type="button" @click="setType('learning')">Learning</button>
+                <button class="memory-filter-btn" :class="{ active: typeFilter === 'preference' }" type="button" @click="setType('preference')">Preference</button>
+                <button class="memory-filter-btn" :class="{ active: typeFilter === 'context' }" type="button" @click="setType('context')">Context</button>
+                <button class="memory-filter-btn" :class="{ active: typeFilter === 'task' }" type="button" @click="setType('task')">Task</button>
+                <button class="memory-filter-btn" :class="{ active: typeFilter === 'reminder' }" type="button" @click="setType('reminder')">Reminder</button>
               </div>
               <div class="memory-filters-right">
                 <select class="memory-category-select" x-model="categoryFilter" @change="load()">
@@ -589,7 +607,7 @@
               <input
                 class="memory-search"
                 type="text"
-                placeholder="search memory..."
+                placeholder="search brain..."
                 x-model="searchQuery"
                 @input.debounce.300ms="load()"
               />
@@ -600,7 +618,7 @@
 
             <div class="memory-loading" x-show="isLoading">
               <span class="loading-spinner"></span>
-              <span>Loading memory...</span>
+              <span>Loading brain...</span>
             </div>
 
             <div class="memory-list" x-show="!isLoading && entries.length > 0">
@@ -610,13 +628,16 @@
                     <div class="memory-card-badges">
                       <span class="memory-type-badge" :class="entry.type" x-text="entry.type"></span>
                       <span class="memory-category-badge" x-show="entry.category" x-text="entry.category"></span>
+                      <span class="memory-category-badge" x-show="entry.key" x-text="entry.key"></span>
+                      <span class="memory-category-badge" x-show="entry.status" x-text="entry.status"></span>
+                      <span class="memory-category-badge" x-show="entry.enabled !== undefined" x-text="entry.enabled ? 'on' : 'off'"></span>
                     </div>
                     <div class="memory-card-meta-right">
                       <span class="memory-card-date" x-text="entry.created || '--'"></span>
                       <button class="memory-delete-btn" type="button" @click="remove(entry)" title="Delete entry">&times;</button>
                     </div>
                   </div>
-                  <div class="memory-card-text" x-text="entry.text"></div>
+                  <div class="memory-card-text" x-text="cardText(entry)"></div>
                   <div class="memory-card-footer">
                     <span class="memory-card-usage" x-show="entry.used > 0">
                       used <span x-text="entry.used"></span>x

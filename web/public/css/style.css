@@ -2266,6 +2266,18 @@ button { font: inherit; }
   color: var(--yellow);
 }
 
+.memory-stat-value.behavior {
+  color: #60a5fa;
+}
+
+.memory-stat-value.task {
+  color: #fb923c;
+}
+
+.memory-stat-value.reminder {
+  color: #f472b6;
+}
+
 .memory-stat-label {
   font-size: 0.65rem;
   text-transform: uppercase;
@@ -2284,6 +2296,7 @@ button { font: inherit; }
 
 .memory-filters {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.4rem;
 }
 
@@ -2401,6 +2414,30 @@ button { font: inherit; }
   border-left-color: var(--yellow);
 }
 
+.memory-card.behavior {
+  border-left-color: #60a5fa;
+}
+
+.memory-card.identity {
+  border-left-color: #a78bfa;
+}
+
+.memory-card.user {
+  border-left-color: #2dd4bf;
+}
+
+.memory-card.context {
+  border-left-color: #9ca3af;
+}
+
+.memory-card.task {
+  border-left-color: #fb923c;
+}
+
+.memory-card.reminder {
+  border-left-color: #f472b6;
+}
+
 .memory-card.stale {
   opacity: 0.55;
 }
@@ -2436,6 +2473,36 @@ button { font: inherit; }
 .memory-type-badge.preference {
   border-color: var(--yellow);
   color: var(--yellow);
+}
+
+.memory-type-badge.behavior {
+  border-color: #60a5fa;
+  color: #60a5fa;
+}
+
+.memory-type-badge.identity {
+  border-color: #a78bfa;
+  color: #a78bfa;
+}
+
+.memory-type-badge.user {
+  border-color: #2dd4bf;
+  color: #2dd4bf;
+}
+
+.memory-type-badge.context {
+  border-color: #9ca3af;
+  color: #9ca3af;
+}
+
+.memory-type-badge.task {
+  border-color: #fb923c;
+  color: #fb923c;
+}
+
+.memory-type-badge.reminder {
+  border-color: #f472b6;
+  color: #f472b6;
 }
 
 .memory-category-badge {

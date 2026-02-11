@@ -331,13 +331,31 @@ app.delete("/api/tasks/:id", async (c) => {
 async function readMemoryEntries() {
   const { entries } = readBrain(BRAIN_PATH);
   const brain = foldBrain(entries);
-  return { learnings: brain.learnings, preferences: brain.preferences };
+  return {
+    behaviors: brain.behaviors,
+    identity: [...brain.identity.values()],
+    user: [...brain.user.values()],
+    learnings: brain.learnings,
+    preferences: brain.preferences,
+    contexts: brain.contexts,
+    tasks: brain.tasks,
+    reminders: brain.reminders,
+  };
 }
 
 app.get("/api/memory", async (c) => {
   try {
-    const { learnings, preferences } = await readMemoryEntries();
-    const allEntries = [...learnings, ...preferences];
+    const all = await readMemoryEntries();
+    const allEntries = [
+      ...all.behaviors,
+      ...all.identity,
+      ...all.user,
+      ...all.learnings,
+      ...all.preferences,
+      ...all.contexts,
+      ...all.tasks,
+      ...all.reminders,
+    ];
 
     const typeFilter = c.req.query("type");
     const categoryFilter = c.req.query("category");
@@ -347,17 +365,26 @@ app.get("/api/memory", async (c) => {
     if (typeFilter) filtered = filtered.filter(e => e.type === typeFilter);
     if (categoryFilter) filtered = filtered.filter(e => (e as any).category === categoryFilter);
     if (q) filtered = filtered.filter(e => {
-      const text = (e as any).text || "";
-      const cat = (e as any).category || "";
-      return text.toLowerCase().includes(q) || cat.toLowerCase().includes(q);
+      const searchable = [
+        (e as any).text, (e as any).category, (e as any).key,
+        (e as any).value, (e as any).content, (e as any).description,
+        (e as any).path, (e as any).project,
+      ].filter(Boolean).join(" ").toLowerCase();
+      return searchable.includes(q);
     });
 
-    const categories = [...new Set(preferences.map(p => p.category))].sort();
+    const categories = [...new Set(all.preferences.map(p => p.category))].sort();
 
     return c.json({
       total: allEntries.length,
-      learnings: learnings.length,
-      preferences: preferences.length,
+      behaviors: all.behaviors.length,
+      identity: all.identity.length,
+      user: all.user.length,
+      learnings: all.learnings.length,
+      preferences: all.preferences.length,
+      contexts: all.contexts.length,
+      tasks: all.tasks.length,
+      reminders: all.reminders.length,
       categories,
       entries: filtered,
     });
@@ -369,10 +396,19 @@ app.get("/api/memory", async (c) => {
 app.delete("/api/memory/:id", async (c) => {
   const entryId = c.req.param("id");
   try {
-    // Find the entry to determine its type
+    // Find the entry across all types
     const { entries } = readBrain(BRAIN_PATH);
     const brain = foldBrain(entries);
-    const allMemory = [...brain.learnings, ...brain.preferences];
+    const allMemory = [
+      ...brain.behaviors,
+      ...[...brain.identity.values()],
+      ...[...brain.user.values()],
+      ...brain.learnings,
+      ...brain.preferences,
+      ...brain.contexts,
+      ...brain.tasks,
+      ...brain.reminders,
+    ];
     const target = allMemory.find(e => e.id === entryId);
     if (!target) return c.json({ error: "Entry not found" }, 404);
 
