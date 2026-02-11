@@ -52,6 +52,19 @@
             >
               Brain
             </button>
+            <a
+              class="nav-tab"
+              href="/review/lobby.html"
+              role="tab"
+              x-show="activeReviewCount > 0"
+              x-cloak
+            >
+              Review
+              <span
+                class="nav-tab-badge"
+                x-text="activeReviewCount"
+              ></span>
+            </a>
             <button
               class="nav-tab nav-tab-icon"
               :class="{ active: view === 'config' }"
@@ -131,10 +144,15 @@
               </aside>
 
               <section class="chat-thread">
-                <!-- Maximize/minimize toggle -->
-                <button class="chat-maximize-btn" type="button" @click="toggleMaximized()" :title="chatMaximized ? 'Exit fullscreen' : 'Fullscreen chat'">
-                  <span x-text="chatMaximized ? '⊡' : '⊞'"></span>
-                </button>
+                <!-- Maximized top bar (only visible in fullscreen) -->
+                <div class="maximized-bar" x-show="chatMaximized" x-transition.opacity>
+                  <div class="maximized-bar-info">
+                    <span class="maximized-bar-title" x-text="activeSession ? sessionLabel(activeSession) : 'rho'"></span>
+                    <span class="chat-live-badge" x-show="isForkActive()">● LIVE</span>
+                  </div>
+                  <button class="maximized-bar-exit" type="button" @click="toggleMaximized()" title="Exit fullscreen (Esc)">⊡</button>
+                </div>
+
                 <div class="chat-thread-header">
                   <div>
                     <div class="chat-thread-title" x-text="activeSession ? sessionLabel(activeSession) : 'Select a session'"></div>
@@ -146,23 +164,21 @@
                   </div>
                   <div class="chat-thread-actions">
                     <button
-                      class="btn btn-ghost"
-                      type="button"
-                      @click="clearSelectedSession()"
-                      x-show="activeSessionId"
-                      :disabled="isStreaming || isForking"
-                      title="Clear session selection"
-                    >
-                      Clear
-                    </button>
-                    <button
-                      class="btn btn-ghost"
+                      class="btn btn-sm btn-green"
                       type="button"
                       @click="forkFromLatest()"
                       :disabled="!activeSession || !hasForkPoints() || isForking"
                     >
                       <span x-show="!isForking">Fork from latest</span>
                       <span x-show="isForking">Forking...</span>
+                    </button>
+                    <button
+                      class="btn btn-sm btn-green"
+                      type="button"
+                      @click="toggleMaximized()"
+                      :title="chatMaximized ? 'Exit fullscreen' : 'Fullscreen chat'"
+                    >
+                      <span x-text="chatMaximized ? '⊡' : '⊞'"></span>
                     </button>
                   </div>
                 </div>

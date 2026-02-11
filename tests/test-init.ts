@@ -62,7 +62,6 @@ const ROOT = resolve(__dirname, "..");
 import {
   detectPlatform,
   generateInitToml,
-  generateSoulMd,
   planInit,
   type Platform,
   type InitPlan,
@@ -195,10 +194,9 @@ console.log("\n=== planInit ===\n");
   assertEq(plan.name, "tau", "plan name matches");
   assertEq(plan.rhoDir, "/tmp/test-rho", "plan rhoDir matches");
 
-  // Should create init.toml, packages.toml, SOUL.md
+  // Should create init.toml, packages.toml
   assert(plan.filesToCreate.has("init.toml"), "creates init.toml");
   assert(plan.filesToCreate.has("packages.toml"), "creates packages.toml");
-  assert(plan.filesToCreate.has("SOUL.md"), "creates SOUL.md");
 
   // Should create data directories
   assert(plan.dirsToCreate.includes("brain"), "creates brain dir");
@@ -207,8 +205,6 @@ console.log("\n=== planInit ===\n");
   // Files should have content
   const initContent = plan.filesToCreate.get("init.toml")!;
   assert(initContent.includes("tau"), "init.toml has agent name");
-  const soulContent = plan.filesToCreate.get("SOUL.md")!;
-  assert(soulContent.includes("tau"), "SOUL.md has agent name");
 }
 
 {
@@ -216,13 +212,12 @@ console.log("\n=== planInit ===\n");
   const plan = planInit({
     name: "tau",
     rhoDir: "/tmp/test-rho",
-    existingFiles: new Set(["init.toml", "packages.toml", "SOUL.md"]),
+    existingFiles: new Set(["init.toml", "packages.toml"]),
   });
 
   // Should NOT overwrite existing files
   assert(!plan.filesToCreate.has("init.toml"), "does not overwrite init.toml");
   assert(!plan.filesToCreate.has("packages.toml"), "does not overwrite packages.toml");
-  assert(!plan.filesToCreate.has("SOUL.md"), "does not overwrite SOUL.md");
 
   // Should still create data dirs (idempotent)
   assert(plan.dirsToCreate.includes("brain"), "still creates brain dir");
@@ -233,16 +228,15 @@ console.log("\n=== planInit ===\n");
 }
 
 {
-  // Partial existing — only SOUL.md exists
+  // Partial existing — only init.toml exists
   const plan = planInit({
     name: "myagent",
     rhoDir: "/tmp/test-rho",
-    existingFiles: new Set(["SOUL.md"]),
+    existingFiles: new Set(["init.toml"]),
   });
 
-  assert(plan.filesToCreate.has("init.toml"), "creates missing init.toml");
+  assert(!plan.filesToCreate.has("init.toml"), "does not overwrite existing init.toml");
   assert(plan.filesToCreate.has("packages.toml"), "creates missing packages.toml");
-  assert(!plan.filesToCreate.has("SOUL.md"), "does not overwrite existing SOUL.md");
 }
 
 {
@@ -327,7 +321,6 @@ import { join } from "node:path";
     // Check files were created
     assert(existsSync(join(tmpRhoDir, "init.toml")), "init.toml created on disk");
     assert(existsSync(join(tmpRhoDir, "packages.toml")), "packages.toml created on disk");
-    assert(existsSync(join(tmpRhoDir, "SOUL.md")), "SOUL.md created on disk");
     assert(existsSync(join(tmpRhoDir, "brain")), "brain/ dir created on disk");
     assert(existsSync(join(tmpRhoDir, "vault")), "vault/ dir created on disk");
 
@@ -337,10 +330,6 @@ import { join } from "node:path";
     assertEq(parsedConfig.agent.name, "testbot", "init.toml on disk has correct name");
     const onDiskValidation = validateConfig(parsedConfig);
     assert(onDiskValidation.valid, "init.toml on disk passes validation");
-
-    // Verify SOUL.md content
-    const soulOnDisk = readFileSync(join(tmpRhoDir, "SOUL.md"), "utf-8");
-    assertIncludes(soulOnDisk, "testbot", "SOUL.md on disk has agent name");
 
     // Run init again — should not overwrite
     const result2 = execSync(

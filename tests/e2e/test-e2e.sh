@@ -107,11 +107,9 @@ echo "$install_output" | tail -5
 
 assert_exit_zero "rho binary on PATH" which rho
 assert_file_exists "$RHO_DIR/init.toml" "init.toml created"
-assert_file_exists "$RHO_DIR/AGENTS.md" "AGENTS.md created"
-assert_file_exists "$RHO_DIR/RHO.md" "RHO.md created"
-assert_file_exists "$RHO_DIR/HEARTBEAT.md" "HEARTBEAT.md created"
+assert_file_exists "$RHO_DIR/packages.toml" "packages.toml created"
 assert_dir_exists "$RHO_DIR/brain" "brain directory created"
-assert_file_exists "$RHO_DIR/brain/core.jsonl" "brain/core.jsonl created"
+assert_file_exists "$RHO_DIR/brain/brain.jsonl" "brain/brain.jsonl created"
 assert_dir_exists "$PI_DIR" "pi agent directory created"
 
 # ── 3. CLI Basics ──────────────────────────────────────
@@ -195,15 +193,15 @@ else
   fail "rho init modified existing init.toml"
 fi
 
-# Running install.sh again shouldn't clobber templates
-original_agents=$(cat "$RHO_DIR/AGENTS.md")
+# Running install.sh again shouldn't clobber brain
+original_brain=$(cat "$RHO_DIR/brain/brain.jsonl")
 (cd "$REPO_DIR" && bash ./install.sh 2>&1) >/dev/null || true
-after_agents=$(cat "$RHO_DIR/AGENTS.md")
+after_brain=$(cat "$RHO_DIR/brain/brain.jsonl")
 
-if [ "$original_agents" = "$after_agents" ]; then
-  pass "install.sh is idempotent (AGENTS.md unchanged)"
+if [ "$original_brain" = "$after_brain" ]; then
+  pass "install.sh is idempotent (brain.jsonl unchanged)"
 else
-  fail "install.sh modified existing AGENTS.md"
+  fail "install.sh modified existing brain.jsonl"
 fi
 
 # ── 8. Tmux / Daemon Lifecycle ─────────────────────────
@@ -289,32 +287,29 @@ pass "sync succeeds after re-enabling module"
 echo ""
 echo "-- Brain --"
 
-assert_file_exists "$RHO_DIR/brain/core.jsonl" "core.jsonl exists"
+assert_file_exists "$RHO_DIR/brain/brain.jsonl" "brain.jsonl exists"
 
-# core.jsonl should have valid JSONL
+# brain.jsonl should have valid JSONL
 while IFS= read -r line; do
   if ! echo "$line" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
-    fail "core.jsonl has invalid JSON line: $line"
+    fail "brain.jsonl has invalid JSON line: $line"
     break
   fi
-done < "$RHO_DIR/brain/core.jsonl"
-pass "core.jsonl is valid JSONL"
+done < "$RHO_DIR/brain/brain.jsonl"
+pass "brain.jsonl is valid JSONL"
 
-# ── 11. Template Variables ─────────────────────────────
+# ── 11. Brain Defaults ─────────────────────────────────
 
 echo ""
-echo "-- Templates --"
+echo "-- Brain Defaults --"
 
-agents_content=$(cat "$RHO_DIR/AGENTS.md")
-# Should NOT contain raw template variables
-if echo "$agents_content" | grep -q '{{'; then
-  fail "AGENTS.md contains unresolved template variables"
+assert_file_exists "$RHO_DIR/brain/brain.jsonl" "brain.jsonl created from defaults"
+# Should contain behavior entries
+if grep -q '"type":"behavior"' "$RHO_DIR/brain/brain.jsonl"; then
+  pass "brain.jsonl contains behavior entries"
 else
-  pass "AGENTS.md template variables resolved"
+  fail "brain.jsonl missing behavior entries"
 fi
-
-# Should contain the actual home path
-assert_contains "$agents_content" "$HOME" "AGENTS.md has correct HOME path"
 
 # ── 12. npm Install Route (rho init without install.sh) ─
 
@@ -328,20 +323,14 @@ env HOME="$NPM_TEST_HOME" PATH="$HOME/.local/bin:$PATH" \
   node --experimental-strip-types "$REPO_DIR/cli/index.ts" init --name "npm-test" >/dev/null 2>&1
 
 assert_file_exists "$NPM_TEST_HOME/.rho/init.toml" "npm route: init.toml created"
-assert_file_exists "$NPM_TEST_HOME/.rho/AGENTS.md" "npm route: AGENTS.md created"
-assert_file_exists "$NPM_TEST_HOME/.rho/RHO.md" "npm route: RHO.md created"
-assert_file_exists "$NPM_TEST_HOME/.rho/HEARTBEAT.md" "npm route: HEARTBEAT.md created"
-assert_file_exists "$NPM_TEST_HOME/.rho/SOUL.md" "npm route: SOUL.md created"
-assert_file_exists "$NPM_TEST_HOME/.rho/brain/core.jsonl" "npm route: brain/core.jsonl created"
+assert_file_exists "$NPM_TEST_HOME/.rho/brain/brain.jsonl" "npm route: brain.jsonl created"
 assert_file_exists "$NPM_TEST_HOME/.rho/tmux.conf" "npm route: tmux.conf created"
 
-# Verify agent name was substituted
-npm_agents=$(cat "$NPM_TEST_HOME/.rho/AGENTS.md")
-assert_contains "$npm_agents" "npm-test" "npm route: AGENTS.md has agent name"
-if echo "$npm_agents" | grep -q '{{'; then
-  fail "npm route: AGENTS.md has unresolved template vars"
+# Verify brain contains behavior entries
+if grep -q '"type":"behavior"' "$NPM_TEST_HOME/.rho/brain/brain.jsonl"; then
+  pass "npm route: brain.jsonl contains behavior entries"
 else
-  pass "npm route: AGENTS.md template vars resolved"
+  fail "npm route: brain.jsonl missing behavior entries"
 fi
 
 rm -rf "$NPM_TEST_HOME"

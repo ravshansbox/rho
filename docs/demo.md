@@ -1,6 +1,6 @@
 # Demo
 
-A quick, repeatable demo you can run in a live pi session. It shows the check-in loop and the brain stats.
+A quick, repeatable demo you can run in a live pi session. It shows the check-in loop and brain stats.
 
 ## Prereqs
 
@@ -8,22 +8,14 @@ A quick, repeatable demo you can run in a live pi session. It shows the check-in
 - `tmux` installed (`pkg install tmux`)
 - Optional: Tasker + AutoInput for the `/tasker` step
 
-## 1. Add a tiny checklist
+## 1. Add a reminder and task
 
 ```bash
-cat > ~/.rho/RHO.md <<'EOF'
-# RHO Checklist
+# Add a daily reminder (goes into brain.jsonl)
+pi -p --no-session "Use the brain tool to add a reminder: 'Check for urgent messages' with daily cadence at 9am"
 
-## Quick Scan
-- [ ] Any urgent messages?
-- [ ] Any failed commands?
-
-## Active Work
-- [ ] Anything blocking me?
-
-## Session Health
-- [ ] Context getting long?
-EOF
+# Add a checklist task
+pi -p --no-session "Use the brain tool to add a task: 'Review any failed commands from recent sessions' with high priority"
 ```
 
 ## 2. Run the demo (inside a pi session)
@@ -46,8 +38,8 @@ Optional Tasker UI read (if configured):
 ## Expected behavior
 
 - The assistant answers the one-sentence question.
-- The memory tool stores the preference and confirms it.
+- The brain tool stores the preference and confirms it.
 - In the new session, the assistant recalls the preference and mentions ripgrep organically.
 - `/rho now` triggers a check-in (inline or in a tmux heartbeat window).
-- The check-in ends with `RHO_OK` if everything is fine.
+- The check-in reads reminders and tasks from the brain, ends with `RHO_OK` if everything is fine.
 - `/tasker read_screen` returns visible UI text and element coordinates.

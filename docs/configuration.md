@@ -18,7 +18,7 @@ Both are created by `rho init`. Edit either one, then run `rho sync`.
 name = "rho"
 ```
 
-The name used in templates (AGENTS.md, SOUL.md) and displayed in status output.
+The agent name displayed in status output.
 
 ### Modules
 
@@ -40,7 +40,6 @@ email = false         # Agent email at name@rhobot.dev
 [modules.skills]
 session-search = true # Search across pi session logs
 update-pi = true      # Update pi to latest version
-soul-update = true    # Mine sessions to evolve SOUL.md
 
 [modules.ui]
 usage-bars = true     # Token/cost usage display

@@ -58,7 +58,7 @@ export function loadTasks(filePath: string = TASKS_PATH): Task[] {
       .filter((line) => line.trim())
       .map((line) => {
         const parsed = JSON.parse(line) as Task;
-        if (!parsed.tags) parsed.tags = [];
+        parsed.tags = Array.isArray(parsed.tags) ? parsed.tags : typeof parsed.tags === "string" && parsed.tags ? parsed.tags.split(",").map((t: string) => t.trim().toLowerCase()).filter(Boolean) : [];
         if (!parsed.due) parsed.due = null;
         if (!parsed.completedAt) parsed.completedAt = null;
         if (!parsed.priority) parsed.priority = "normal";
@@ -200,7 +200,8 @@ export function formatTask(task: Task): string {
   let line = `${status} [${task.id}] ${task.description}`;
   if (task.priority !== "normal") line += ` (${task.priority})`;
   if (task.due) line += ` due:${task.due}`;
-  if (task.tags.length > 0) line += ` #${task.tags.join(" #")}`;
+  const tags = Array.isArray(task.tags) ? task.tags : [];
+  if (tags.length > 0) line += ` #${tags.join(" #")}`;
   if (task.completedAt) line += ` done:${task.completedAt.slice(0, 10)}`;
   return line;
 }
@@ -224,7 +225,8 @@ export function buildHeartbeatSection(filePath: string = TASKS_PATH): string | n
       if (t.due < now) line += ` **OVERDUE** (due ${t.due})`;
       else line += ` (due ${t.due})`;
     }
-    if (t.tags.length > 0) line += ` [${t.tags.join(", ")}]`;
+    const tTags = Array.isArray(t.tags) ? t.tags : [];
+    if (tTags.length > 0) line += ` [${tTags.join(", ")}]`;
     return line;
   });
 

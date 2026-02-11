@@ -86,6 +86,14 @@ function computeNextDue(
   return new Date(ranAt.getTime() + 24 * 3600 * 1000).toISOString();
 }
 
+// ── Tag normalization ─────────────────────────────────────────────
+
+function normalizeTags(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw.map((t) => String(t).trim().toLowerCase()).filter(Boolean);
+  if (typeof raw === "string" && raw.trim()) return raw.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean);
+  return [];
+}
+
 // ── Text normalization for dedup ──────────────────────────────────
 
 function normalizeText(s: string): string {
@@ -265,6 +273,11 @@ async function handleAdd(
   delete entry.action;
   entry.created = now;
 
+  // Parse cadence if passed as JSON string
+  if (typeof entry.cadence === "string") {
+    try { entry.cadence = JSON.parse(entry.cadence); } catch { /* leave as-is */ }
+  }
+
   // Generate id
   const keyField = KEYED_TYPES[type];
   if (keyField) {
@@ -281,7 +294,7 @@ async function handleAdd(
   if (type === "task") {
     entry.status = entry.status ?? "pending";
     entry.priority = entry.priority ?? "normal";
-    entry.tags = entry.tags ?? [];
+    entry.tags = normalizeTags(entry.tags);
     entry.due = entry.due ?? null;
     entry.completedAt = entry.completedAt ?? null;
   }
@@ -289,7 +302,7 @@ async function handleAdd(
   // Apply defaults for reminder
   if (type === "reminder") {
     entry.priority = entry.priority ?? "normal";
-    entry.tags = entry.tags ?? [];
+    entry.tags = normalizeTags(entry.tags);
     entry.last_run = entry.last_run ?? null;
     entry.next_due = entry.next_due ?? null;
     entry.last_result = entry.last_result ?? null;
@@ -343,6 +356,11 @@ async function handleUpdate(
     if (k === "action") continue;
     merged[k] = v;
   }
+  // Parse cadence if passed as JSON string
+  if (typeof merged.cadence === "string") {
+    try { merged.cadence = JSON.parse(merged.cadence); } catch { /* leave as-is */ }
+  }
+  if ("tags" in merged) merged.tags = normalizeTags(merged.tags);
   merged.created = new Date().toISOString();
 
   const validation = validateEntry(merged as BrainEntry);

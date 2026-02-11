@@ -152,9 +152,12 @@ Options:
     created++;
   }
 
-  // Copy brain defaults
+  // Copy brain defaults (with date substitution)
+  const now = new Date().toISOString();
   for (const [src, target] of bootstrap.brainFilesToCopy) {
-    fs.copyFileSync(src, target);
+    let content = fs.readFileSync(src, "utf-8");
+    content = content.replace(/DATE_PLACEHOLDER/g, now);
+    fs.writeFileSync(target, content);
     if (verbose) console.log(`✓ Created ${path.basename(target)}`);
     created++;
   }

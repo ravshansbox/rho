@@ -34,6 +34,47 @@ type WSIncomingMessage = {
   command?: RPCCommand;
 };
 
+// --- Review (line-level commenting) ---
+
+type ReviewFile = {
+  path: string;
+  relativePath: string;
+  content: string;
+  language: string;
+};
+
+type ReviewComment = {
+  file: string;
+  startLine: number;
+  endLine: number;
+  selectedText: string;
+  comment: string;
+};
+
+type ReviewSession = {
+  id: string;
+  token: string;
+  files: ReviewFile[];
+  warnings: string[];
+  message?: string;
+  createdAt: number;
+  done: boolean;
+  result: { cancelled: boolean; comments: ReviewComment[] } | null;
+  toolSockets: Set<WSContext<WebSocket>>;
+  uiSockets: Set<WSContext<WebSocket>>;
+};
+
+const reviewSessions = new Map<string, ReviewSession>();
+
+function getReviewSession(id: string): ReviewSession | null {
+  return reviewSessions.get(id) ?? null;
+}
+
+function requireReviewToken(c: any, session: ReviewSession): boolean {
+  const token = c.req.query("token");
+  return typeof token === "string" && token === session.token;
+}
+
 function sendWsMessage(ws: WSContext<WebSocket>, message: Record<string, unknown>): void {
   ws.send(JSON.stringify(message));
 }
@@ -128,6 +169,214 @@ async function loadPiSessionManagerModule(): Promise<{
 // --- Health ---
 
 app.get("/api/health", (c) => c.json({ status: "ok" }));
+
+// --- Review API ---
+
+app.get("/api/review/sessions", (c) => {
+  const sessions = [];
+  for (const [id, s] of reviewSessions) {
+    sessions.push({
+      id,
+      fileCount: s.files.length,
+      files: s.files.map((f) => f.relativePath),
+      message: s.message ?? null,
+      createdAt: s.createdAt,
+      done: s.done,
+      cancelled: s.result?.cancelled ?? null,
+      commentCount: s.result?.comments?.length ?? 0,
+      token: s.token,
+    });
+  }
+  // Newest first
+  sessions.sort((a, b) => b.createdAt - a.createdAt);
+  return c.json(sessions);
+});
+
+app.post("/api/review/sessions", async (c) => {
+  let body: { files?: ReviewFile[]; warnings?: string[]; message?: string };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const files = Array.isArray(body.files) ? body.files : [];
+  if (files.length === 0) {
+    return c.json({ error: "files is required" }, 400);
+  }
+
+  const id = crypto.randomUUID();
+  const token = crypto.randomUUID().replace(/-/g, "");
+  const session: ReviewSession = {
+    id,
+    token,
+    files,
+    warnings: Array.isArray(body.warnings) ? body.warnings : [],
+    message: typeof body.message === "string" ? body.message : undefined,
+    createdAt: Date.now(),
+    done: false,
+    result: null,
+    toolSockets: new Set(),
+    uiSockets: new Set(),
+  };
+
+  reviewSessions.set(id, session);
+
+  // Auto-expire stale sessions
+  setTimeout(() => {
+    const s = reviewSessions.get(id);
+    if (!s) return;
+    // Keep active sessions for up to 2 hours
+    if (Date.now() - s.createdAt > 2 * 60 * 60 * 1000) {
+      reviewSessions.delete(id);
+    }
+  }, 2 * 60 * 60 * 1000).unref?.();
+
+  const origin = new URL(c.req.url).origin;
+  const url = `${origin}/review/${id}?token=${token}`;
+  return c.json({ id, token, url });
+});
+
+app.get("/review", async (c) => {
+  try {
+    const html = await readFile(path.join(publicDir, "review", "lobby.html"), "utf-8");
+    return c.html(html);
+  } catch (error) {
+    return c.text((error as Error).message ?? "Failed to load review lobby", 500);
+  }
+});
+
+app.get("/review/:id", async (c) => {
+  const id = c.req.param("id");
+  const session = getReviewSession(id);
+  if (!session) return c.text("Review session not found", 404);
+  if (!requireReviewToken(c, session)) return c.text("Forbidden", 403);
+
+  try {
+    const template = await readFile(path.join(publicDir, "review", "index.html"), "utf-8");
+    const html = template
+      .replace(/__SESSION_ID__/g, id)
+      .replace(/__TOKEN__/g, session.token);
+    return c.html(html);
+  } catch (error) {
+    return c.text((error as Error).message ?? "Failed to load review UI", 500);
+  }
+});
+
+app.get("/review/:id/api/files", (c) => {
+  const id = c.req.param("id");
+  const session = getReviewSession(id);
+  if (!session) return c.json({ error: "not found" }, 404);
+  if (!requireReviewToken(c, session)) return c.json({ error: "forbidden" }, 403);
+  return c.json(session.files);
+});
+
+app.get("/review/:id/api/warnings", (c) => {
+  const id = c.req.param("id");
+  const session = getReviewSession(id);
+  if (!session) return c.json({ error: "not found" }, 404);
+  if (!requireReviewToken(c, session)) return c.json({ error: "forbidden" }, 403);
+  return c.json(session.warnings ?? []);
+});
+
+app.get("/review/:id/api/config", (c) => {
+  const id = c.req.param("id");
+  const session = getReviewSession(id);
+  if (!session) return c.json({ error: "not found" }, 404);
+  if (!requireReviewToken(c, session)) return c.json({ error: "forbidden" }, 403);
+  const cfg: Record<string, string> = {};
+  if (session.message) cfg.message = session.message;
+  return c.json(cfg);
+});
+
+app.get(
+  "/review/:id/ws",
+  upgradeWebSocket((c) => {
+    const id = c.req.param("id");
+    const session = getReviewSession(id);
+    const token = c.req.query("token");
+    const role = c.req.query("role") === "tool" ? "tool" : "ui";
+
+    if (!session || typeof token !== "string" || token !== session.token) {
+      return {
+        onOpen: (_, ws) => {
+          try {
+            ws.close();
+          } catch {}
+        },
+      };
+    }
+
+    return {
+      onOpen: (_, ws) => {
+        if (role === "tool") {
+          session.toolSockets.add(ws);
+          // If already done, send result immediately
+          if (session.done && session.result) {
+            sendWsMessage(ws, { type: "review_result", ...session.result });
+          } else {
+            sendWsMessage(ws, { type: "init" });
+          }
+        } else {
+          session.uiSockets.add(ws);
+          sendWsMessage(ws, { type: "init" });
+        }
+      },
+      onMessage: (event, ws) => {
+        if (typeof event.data !== "string") return;
+        if (role !== "ui") return;
+
+        let msg: any;
+        try {
+          msg = JSON.parse(event.data);
+        } catch {
+          return;
+        }
+
+        if (session.done) {
+          return;
+        }
+
+        if (msg?.type === "submit" && Array.isArray(msg.comments)) {
+          session.done = true;
+          session.result = { cancelled: false, comments: msg.comments as ReviewComment[] };
+        } else if (msg?.type === "cancel") {
+          session.done = true;
+          session.result = { cancelled: true, comments: [] };
+        } else {
+          return;
+        }
+
+        // Fan out to tool sockets
+        for (const toolWs of session.toolSockets) {
+          try {
+            sendWsMessage(toolWs, { type: "review_result", ...session.result });
+          } catch {}
+        }
+
+        // Close all UI sockets
+        for (const uiWs of session.uiSockets) {
+          try {
+            uiWs.close();
+          } catch {}
+        }
+
+        // Cleanup after 10 minutes
+        setTimeout(() => {
+          reviewSessions.delete(id);
+        }, 10 * 60 * 1000).unref?.();
+      },
+      onClose: (_, ws) => {
+        session.toolSockets.delete(ws);
+        session.uiSockets.delete(ws);
+      },
+      onError: (_, ws) => {
+        session.toolSockets.delete(ws);
+        session.uiSockets.delete(ws);
+      },
+    };
+  })
+);
 
 // --- Config API ---
 
@@ -680,6 +929,8 @@ app.get("/", async (c) => {
 app.use("/css/*", serveStatic({ root: publicDir }));
 app.use("/js/*", serveStatic({ root: publicDir }));
 app.use("/assets/*", serveStatic({ root: publicDir }));
+app.use("/review/css/*", serveStatic({ root: publicDir }));
+app.use("/review/js/*", serveStatic({ root: publicDir }));
 
 // --- Cleanup ---
 

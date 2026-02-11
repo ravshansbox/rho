@@ -84,19 +84,19 @@ Feature: rho run -- dispatch coding tasks to hats or pi
   # ---------------------------------------------------------------------------
 
   Scenario: Heartbeat dispatches coding tasks via "rho run"
-    Given HEARTBEAT.md contains a task tagged with "[code]":
+    Given brain.jsonl contains a reminder with tag "code":
       """
-      - [ ] [code] Refactor auth module to use JWT [every:weekly]
+      {"type":"reminder","text":"Refactor auth module to use JWT","cadence":{"kind":"interval","every":"1w"},"tags":["code"]}
       """
     And hats is installed and on PATH
     When the rho heartbeat fires
     Then rho should dispatch the task via "rho run 'Refactor auth module to use JWT'"
-    And the heartbeat should mark the task as in-progress
+    And the heartbeat should record the reminder as run
 
   Scenario: Heartbeat uses pi subagent for non-code tasks
-    Given HEARTBEAT.md contains a task NOT tagged with "[code]":
+    Given brain.jsonl contains a reminder without "code" tag:
       """
-      - [ ] Consolidate memory [every:daily]
+      {"type":"reminder","text":"Consolidate memory","cadence":{"kind":"daily","at":"01:00"},"tags":["maintenance"]}
       """
     When the rho heartbeat fires
     Then rho should handle the task via pi subagent (not hats)

@@ -5,7 +5,7 @@ description: "Install and configure Rho from scratch (Doom-style init.toml + syn
 
 # Install Rho
 
-Rho is a persistent AI agent framework. It runs in tmux, checks in on a heartbeat, accumulates memory across sessions, and manages a knowledge vault. This skill installs it from scratch.
+Rho is a persistent AI agent framework. It runs in tmux, checks in on a heartbeat, accumulates memory in a single brain.jsonl file, and manages a knowledge vault. This skill installs it from scratch.
 
 **Prerequisites:** A coding agent that can run shell commands. That's it.
 
@@ -13,13 +13,13 @@ Rho is a persistent AI agent framework. It runs in tmux, checks in on a heartbea
 - System deps (Node.js 18+, npm, tmux, git)
 - [pi coding agent](https://github.com/badlogic/pi-mono) (the runtime rho extends)
 - [rho](https://github.com/mikeyobrien/rho) (the agent framework)
-- Config files in `~/.rho/` (AGENTS.md, SOUL.md, RHO.md, init.toml)
+- Config files in `~/.rho/` (init.toml, packages.toml, brain.jsonl)
 
 **Time:** ~5 minutes on a decent connection.
 
 ## Parameters
 
-- **agent_name** (optional, default: `rho`): Name written into `~/.rho/init.toml` and templates.
+- **agent_name** (optional, default: `rho`): Name written into `~/.rho/init.toml`.
 - **heartbeat_interval** (optional, default: `30m`): How often the agent checks in. Written to `[settings.heartbeat].interval`.
 
 ## Steps
@@ -91,7 +91,7 @@ pi --version
 
 ### 4. Install rho
 
-Clone the repo and run the installer. The installer handles config bootstrapping, CLI setup, and template generation.
+Clone the repo and run the installer. The installer handles config bootstrapping, CLI setup, and brain initialization.
 
 **Constraints:**
 - You MUST clone to `~/.rho/project` (the default path).
@@ -114,7 +114,7 @@ The installer will:
 2. Check/install remaining dependencies
 3. Install Node deps for the project
 4. Set up the `rho` CLI on your PATH
-5. Run `rho init` (generates `~/.rho/init.toml`, `~/.rho/AGENTS.md`, `~/.rho/SOUL.md`, `~/.rho/RHO.md`, brain defaults)
+5. Run `rho init` (generates `~/.rho/init.toml`, `~/.rho/packages.toml`, and brain.jsonl defaults)
 6. Run `rho sync` (writes pi's `settings.json` from your config)
 
 ### 5. Configure heartbeat interval (optional)
@@ -163,11 +163,17 @@ This starts the daemon if needed and attaches to the tmux session.
 Share these essentials with the user:
 
 **Key files:**
-- `~/.rho/init.toml` — Main config (Doom-style: modules, settings, platform overrides)
-- `~/.rho/AGENTS.md` — Agent operating principles (injected into system prompt)
-- `~/.rho/SOUL.md` — Agent personality and identity
-- `~/.rho/RHO.md` — Heartbeat checklist (read on every check-in)
-- `~/.rho/HEARTBEAT.md` — Scheduled/time-based tasks
+- `~/.rho/init.toml` — Main config (Doom-style: modules, settings)
+- `~/.rho/packages.toml` — Third-party pi packages
+- `~/.rho/brain/brain.jsonl` — Single source of truth for all memory (behaviors, learnings, preferences, tasks, reminders)
+
+**Memory system:**
+- `/brain` or `brain action=list` — View memory stats
+- `brain action=add type=learning text="..."` — Add a learning
+- `brain action=add type=preference text="..." category=Code` — Add a preference
+- `brain action=add type=task description="..." priority=high` — Add a task
+- `brain action=add type=reminder text="..." cadence={kind:"daily",at:"08:00"}` — Add a reminder
+- `memory-clean` — Run consolidation (decay stale entries, mine sessions for new learnings)
 
 **CLI basics:**
 - `rho` — Start and attach

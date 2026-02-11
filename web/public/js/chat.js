@@ -641,6 +641,11 @@ document.addEventListener("alpine:init", () => {
     toggleMaximized() {
       this.chatMaximized = !this.chatMaximized;
       document.body.classList.toggle("chat-maximized", this.chatMaximized);
+      if (this.chatMaximized) {
+        localStorage.setItem("rho-maximized", "1");
+      } else {
+        localStorage.removeItem("rho-maximized");
+      }
     },
 
     enterMaximized() {
@@ -659,8 +664,15 @@ document.addEventListener("alpine:init", () => {
       }
     },
 
+    handleGlobalKeydown(event) {
+      if (event.key === "Escape" && this.chatMaximized) {
+        this.exitMaximized();
+      }
+    },
+
     // Auto-scroll state
     userScrolledUp: false,
+    _programmaticScroll: false,
 
     // Chat controls state
     availableModels: [],
@@ -719,10 +731,16 @@ document.addEventListener("alpine:init", () => {
 
     setupKeyboardShortcuts() {
       document.addEventListener("keydown", (e) => {
-        // Escape to close dialogs
         if (e.key === "Escape") {
+          // Close dialogs first
           if (this.extensionDialog) {
             this.dismissDialog(null);
+            e.preventDefault();
+            return;
+          }
+          // Then exit maximized mode
+          if (this.chatMaximized) {
+            this.exitMaximized();
             e.preventDefault();
             return;
           }
@@ -747,6 +765,11 @@ document.addEventListener("alpine:init", () => {
     handleThreadScroll() {
       const el = this.$refs.thread;
       if (!el) return;
+      // Ignore scroll events triggered by programmatic scrolling
+      if (this._programmaticScroll) {
+        this._programmaticScroll = false;
+        return;
+      }
       this.userScrolledUp = el.scrollTop + el.clientHeight < el.scrollHeight - 50;
     },
 
@@ -890,6 +913,11 @@ document.addEventListener("alpine:init", () => {
       if (event.type === "response") {
         if (!event.success) {
           this.error = event.error ?? `RPC command failed: ${event.command ?? "unknown"}`;
+        }
+        // Clear sending flag once RPC acknowledges the prompt.
+        // For normal prompts, isStreaming (agent_start/agent_end) gates the UI.
+        // For slash commands that bypass the LLM, this prevents a permanent lock.
+        if (event.command === "prompt") {
           this.isSendingPrompt = false;
         }
         // Handle get_state response
@@ -1460,11 +1488,12 @@ document.addEventListener("alpine:init", () => {
 
     scrollThreadToBottom() {
       if (this.userScrolledUp) return;
-      const thread = this.$refs.thread;
-      if (!thread) {
-        return;
-      }
-      thread.scrollTop = thread.scrollHeight;
+      this.$nextTick(() => {
+        const thread = this.$refs.thread;
+        if (!thread) return;
+        this._programmaticScroll = true;
+        thread.scrollTop = thread.scrollHeight;
+      });
     },
 
     startPolling() {
@@ -1882,6 +1911,8 @@ document.addEventListener("alpine:init", () => {
           this.scrollThreadToBottom();
         });
       }
+
+      this.focusComposer();
     },
 
     messageForkPreview(message) {
@@ -2058,6 +2089,8 @@ document.addEventListener("alpine:init", () => {
           message,
         },
       });
+
+      this.focusComposer();
     },
 
     sendFollowUp() {
@@ -2077,6 +2110,8 @@ document.addEventListener("alpine:init", () => {
           message,
         },
       });
+
+      this.focusComposer();
     },
 
     handlePromptSubmit() {

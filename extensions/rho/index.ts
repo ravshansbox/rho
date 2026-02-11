@@ -1698,7 +1698,8 @@ export default function (pi: ExtensionAPI) {
     if (dueReminders.length > 0) {
       remindersSection = dueReminders.map(r => {
         const priority = r.priority !== "normal" ? ` (${r.priority})` : "";
-        const tags = r.tags.length > 0 ? ` [${r.tags.join(", ")}]` : "";
+        const rTags = Array.isArray(r.tags) ? r.tags : [];
+        const tags = rTags.length > 0 ? ` [${rTags.join(", ")}]` : "";
         return `- [${r.id}] ${r.text}${priority}${tags}`;
       }).join("\n");
     }
@@ -1713,7 +1714,8 @@ export default function (pi: ExtensionAPI) {
           if (t.due < nowStr) line += ` **OVERDUE** (due ${t.due})`;
           else line += ` (due ${t.due})`;
         }
-        if (t.tags.length > 0) line += ` [${t.tags.join(", ")}]`;
+        const tTags = Array.isArray(t.tags) ? t.tags : [];
+        if (tTags.length > 0) line += ` [${tTags.join(", ")}]`;
         return line;
       }).join("\n");
     }
@@ -2091,7 +2093,7 @@ Instructions:
 
           const lines = res.results.map((r, i) => {
             let line = `${i + 1}. **${r.title}** (${r.path}) [${r.type}]`;
-            if (r.tags?.length > 0) line += ` {${r.tags.join(", ")}}`;
+            if (Array.isArray(r.tags) && r.tags.length > 0) line += ` {${r.tags.join(", ")}}`;
             if (r.score) line += ` score:${Number(r.score).toFixed(3)}`;
             if (r.snippet) line += `\n   ${r.snippet}`;
             if (r.wikilinks?.length > 0) line += `\n   links: ${r.wikilinks.map((l) => `[[${l}]]`).join(", ")}`;

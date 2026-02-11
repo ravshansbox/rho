@@ -24,28 +24,6 @@ ln -sf "$SHARE_DIR/skills" "$PI_DIR/skills"
 
 echo "✓ Symlinked extensions and skills"
 
-# Bootstrap AGENTS.md
-if [ ! -f "$HOME/AGENTS.md" ]; then
-  if [ -n "$TERMUX_VERSION" ]; then
-    OS="Android / Termux $TERMUX_VERSION"
-  else
-    OS=$(uname -s)
-  fi
-  ARCH=$(uname -m)
-  USER_SHELL=$(basename "$SHELL")
-
-  sed -e "s|{{OS}}|$OS|g" \
-      -e "s|{{ARCH}}|$ARCH|g" \
-      -e "s|{{SHELL}}|$USER_SHELL|g" \
-      -e "s|{{HOME}}|$HOME|g" \
-      -e "s|{{CONFIG_PATH}}|$PI_DIR|g" \
-      -e "s|{{BRAIN_PATH}}|$BRAIN_DIR|g" \
-      -e "s|{{RHO_DIR}}|$RHO_DIR|g" \
-      -e "s|{{SKILLS_PATH}}|$PI_DIR/skills|g" \
-      "$SHARE_DIR/AGENTS.md.template" > "$HOME/AGENTS.md"
-  echo "✓ Created ~/AGENTS.md"
-fi
-
 # Bootstrap brain defaults
 for f in "$SHARE_DIR/brain"/*.jsonl.default; do
   [ -f "$f" ] || continue
@@ -55,24 +33,6 @@ for f in "$SHARE_DIR/brain"/*.jsonl.default; do
     echo "✓ Created $(basename "$target")"
   fi
 done
-
-# Bootstrap RHO.md
-if [ ! -f "$HOME/RHO.md" ]; then
-  cp "$SHARE_DIR/RHO.md.template" "$HOME/RHO.md"
-  echo "✓ Created ~/RHO.md"
-fi
-
-# Bootstrap HEARTBEAT.md
-if [ ! -f "$HOME/HEARTBEAT.md" ]; then
-  cp "$SHARE_DIR/HEARTBEAT.md.template" "$HOME/HEARTBEAT.md"
-  echo "✓ Created ~/HEARTBEAT.md"
-fi
-
-# Bootstrap SOUL.md
-if [ ! -f "$HOME/SOUL.md" ]; then
-  cp "$SHARE_DIR/SOUL.md.template" "$HOME/SOUL.md"
-  echo "✓ Created ~/SOUL.md"
-fi
 
 # Install pi-coding-agent if not present
 if ! command -v pi &> /dev/null; then

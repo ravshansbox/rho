@@ -303,13 +303,11 @@ show_done() {
     android)
       echo "  optional:"
       echo "    install Tasker for UI automation"
-      echo "    edit ~/.rho/SOUL.md for personality"
-      echo "    edit ~/.rho/RHO.md for custom tasks"
+      echo "    use /brain to manage memory and reminders"
       ;;
     *)
       echo "  optional:"
-      echo "    edit ~/.rho/SOUL.md for personality"
-      echo "    edit ~/.rho/RHO.md for custom tasks"
+      echo "    use /brain to manage memory and reminders"
       ;;
   esac
   echo ""

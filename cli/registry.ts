@@ -75,12 +75,6 @@ export const REGISTRY: Record<string, ModuleEntry> = {
     skills: ["skills/update-pi"],
     description: "Update pi coding agent to latest version",
   },
-  "soul-update": {
-    category: "skills",
-    extensions: [],
-    skills: ["skills/soul-update"],
-    description: "Mine sessions to learn about the user and evolve identity/behavior entries in brain.jsonl",
-  },
 
   subagents: {
     category: "tools",

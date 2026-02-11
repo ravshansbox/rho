@@ -506,13 +506,33 @@ export function buildBrainPrompt(
 
   if (!hasContent) return "";
 
-  // Compute section budgets
-  let behaviorBudget = Math.floor(budget * SECTION_WEIGHTS.behavior);
-  let prefsBudget = Math.floor(budget * SECTION_WEIGHTS.preferences);
-  let contextBudget = Math.floor(budget * SECTION_WEIGHTS.context);
-  let learningsBudget = Math.floor(budget * SECTION_WEIGHTS.learnings);
-
+  // ── Fixed-cost sections (identity, user) — rendered first, subtracted from budget ──
+  let remainingBudget = budget;
   const sections: string[] = [];
+
+  if (brain.identity.size > 0) {
+    const lines = [...brain.identity.values()]
+      .sort((a, b) => a.key.localeCompare(b.key))
+      .map((e) => `**${e.key}:** ${e.value}`);
+    const rendered = "## Identity\n" + lines.join("\n");
+    sections.push(rendered);
+    remainingBudget -= approxTokens(rendered + "\n\n");
+  }
+
+  if (brain.user.size > 0) {
+    const lines = [...brain.user.values()]
+      .sort((a, b) => a.key.localeCompare(b.key))
+      .map((e) => `**${e.key}:** ${e.value}`);
+    const rendered = "## User\n" + lines.join("\n");
+    sections.push(rendered);
+    remainingBudget -= approxTokens(rendered + "\n\n");
+  }
+
+  // Compute weighted section budgets from remaining space
+  let behaviorBudget = Math.floor(remainingBudget * SECTION_WEIGHTS.behavior);
+  let prefsBudget = Math.floor(remainingBudget * SECTION_WEIGHTS.preferences);
+  let contextBudget = Math.floor(remainingBudget * SECTION_WEIGHTS.context);
+  let learningsBudget = Math.floor(remainingBudget * SECTION_WEIGHTS.learnings);
 
   // ── Behavior ──
   const behaviorLines: string[] = [];
@@ -616,12 +636,25 @@ export function getInjectedIds(
   const ids = new Set<string>();
   const totalBudget = opts?.promptBudget ?? DEFAULT_BUDGET;
   const headerOverhead = approxTokens("## Memory\n\n");
-  const budget = totalBudget - headerOverhead;
+  let remainingBudget = totalBudget - headerOverhead;
 
-  let behaviorBudget = Math.floor(budget * SECTION_WEIGHTS.behavior);
-  let prefsBudget = Math.floor(budget * SECTION_WEIGHTS.preferences);
-  let contextBudget = Math.floor(budget * SECTION_WEIGHTS.context);
-  let learningsBudget = Math.floor(budget * SECTION_WEIGHTS.learnings);
+  // ── Fixed-cost: identity, user ──
+  for (const e of brain.identity.values()) {
+    ids.add(e.id);
+    remainingBudget -= approxTokens(`**${e.key}:** ${e.value}\n`);
+  }
+  if (brain.identity.size > 0) remainingBudget -= approxTokens("## Identity\n");
+
+  for (const e of brain.user.values()) {
+    ids.add(e.id);
+    remainingBudget -= approxTokens(`**${e.key}:** ${e.value}\n`);
+  }
+  if (brain.user.size > 0) remainingBudget -= approxTokens("## User\n");
+
+  let behaviorBudget = Math.floor(remainingBudget * SECTION_WEIGHTS.behavior);
+  let prefsBudget = Math.floor(remainingBudget * SECTION_WEIGHTS.preferences);
+  let contextBudget = Math.floor(remainingBudget * SECTION_WEIGHTS.context);
+  let learningsBudget = Math.floor(remainingBudget * SECTION_WEIGHTS.learnings);
 
   // ── Behaviors ──
   const behaviorLines = brain.behaviors.map((b) => ({ id: b.id, text: b.text }));

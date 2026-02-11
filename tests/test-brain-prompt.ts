@@ -6,9 +6,12 @@
 import {
   buildBrainPrompt,
   foldBrain,
+  getInjectedIds,
   type BrainEntry,
   type MaterializedBrain,
   type BehaviorEntry,
+  type IdentityEntry,
+  type UserEntry,
   type LearningEntry,
   type PreferenceEntry,
   type ContextEntry,
@@ -277,6 +280,125 @@ console.log("\n--- configurable budget: 500 < 2000 ---");
   const small = buildBrainPrompt(brain, "/tmp", { promptBudget: 500 });
   const large = buildBrainPrompt(brain, "/tmp", { promptBudget: 2000 });
   assert(small.length < large.length, `budget 500 (${small.length} chars) < budget 2000 (${large.length} chars)`);
+}
+
+console.log("\n--- identity rendered in prompt ---");
+{
+  const brain = emptyBrain();
+  brain.identity.set("name", {
+    id: "id-1", type: "identity", key: "name", value: "rho", created: daysAgo(0),
+  } as IdentityEntry);
+  brain.identity.set("role", {
+    id: "id-2", type: "identity", key: "role", value: "A persistent coding agent", created: daysAgo(0),
+  } as IdentityEntry);
+
+  const result = buildBrainPrompt(brain, "/tmp");
+  assert(result.includes("## Identity"), "identity section header present");
+  assert(result.includes("**name:** rho"), "identity key-value rendered");
+  assert(result.includes("**role:** A persistent coding agent"), "identity role rendered");
+}
+
+console.log("\n--- user rendered in prompt ---");
+{
+  const brain = emptyBrain();
+  brain.user.set("name", {
+    id: "u-1", type: "user", key: "name", value: "Mikey", created: daysAgo(0),
+  } as UserEntry);
+  brain.user.set("timezone", {
+    id: "u-2", type: "user", key: "timezone", value: "US/Central", created: daysAgo(0),
+  } as UserEntry);
+
+  const result = buildBrainPrompt(brain, "/tmp");
+  assert(result.includes("## User"), "user section header present");
+  assert(result.includes("**name:** Mikey"), "user name rendered");
+  assert(result.includes("**timezone:** US/Central"), "user timezone rendered");
+}
+
+console.log("\n--- identity + user appear before behavior ---");
+{
+  const brain = emptyBrain();
+  brain.identity.set("name", {
+    id: "id-1", type: "identity", key: "name", value: "rho", created: daysAgo(0),
+  } as IdentityEntry);
+  brain.user.set("name", {
+    id: "u-1", type: "user", key: "name", value: "Mikey", created: daysAgo(0),
+  } as UserEntry);
+  brain.behaviors.push({
+    id: "b1", type: "behavior", created: daysAgo(0), category: "do", text: "Be direct",
+  } as BehaviorEntry);
+  brain.learnings.push({
+    id: "l1", type: "learning", created: daysAgo(0), text: "Use pnpm",
+  } as LearningEntry);
+
+  const result = buildBrainPrompt(brain, "/tmp");
+  const identityIdx = result.indexOf("## Identity");
+  const userIdx = result.indexOf("## User");
+  const behaviorIdx = result.indexOf("## Behavior");
+  const learningsIdx = result.indexOf("## Learnings");
+
+  assert(identityIdx >= 0, "identity section present");
+  assert(userIdx >= 0, "user section present");
+  assert(identityIdx < userIdx, "identity before user");
+  assert(userIdx < behaviorIdx, "user before behavior");
+  assert(behaviorIdx < learningsIdx, "behavior before learnings");
+}
+
+console.log("\n--- identity + user reduce budget for other sections ---");
+{
+  const brain = emptyBrain();
+  // Add identity and user entries that consume some budget
+  brain.identity.set("name", {
+    id: "id-1", type: "identity", key: "name", value: "rho", created: daysAgo(0),
+  } as IdentityEntry);
+  brain.user.set("name", {
+    id: "u-1", type: "user", key: "name", value: "Mikey", created: daysAgo(0),
+  } as UserEntry);
+  for (let i = 0; i < 100; i++) {
+    brain.learnings.push({
+      id: `l${i}`, type: "learning", created: daysAgo(i),
+      text: `Learning ${i}: content for budget test with identity overhead`,
+    } as LearningEntry);
+  }
+
+  const result = buildBrainPrompt(brain, "/tmp", { promptBudget: 500 });
+  const tokens = approxTokens(result);
+  assert(tokens <= 500, `budget=500 still enforced with identity+user: got ${tokens} tokens`);
+  assert(result.includes("## Identity"), "identity present in constrained budget");
+}
+
+console.log("\n--- getInjectedIds includes identity + user ---");
+{
+  const brain = emptyBrain();
+  brain.identity.set("name", {
+    id: "id-1", type: "identity", key: "name", value: "rho", created: daysAgo(0),
+  } as IdentityEntry);
+  brain.user.set("tz", {
+    id: "u-1", type: "user", key: "tz", value: "US/Central", created: daysAgo(0),
+  } as UserEntry);
+  brain.learnings.push({
+    id: "l1", type: "learning", created: daysAgo(0), text: "Use pnpm",
+  } as LearningEntry);
+
+  const ids = getInjectedIds(brain, "/tmp");
+  assert(ids.has("id-1"), "identity id injected");
+  assert(ids.has("u-1"), "user id injected");
+  assert(ids.has("l1"), "learning id still injected");
+}
+
+console.log("\n--- identity keys sorted alphabetically ---");
+{
+  const brain = emptyBrain();
+  brain.identity.set("role", {
+    id: "id-2", type: "identity", key: "role", value: "agent", created: daysAgo(0),
+  } as IdentityEntry);
+  brain.identity.set("name", {
+    id: "id-1", type: "identity", key: "name", value: "rho", created: daysAgo(0),
+  } as IdentityEntry);
+
+  const result = buildBrainPrompt(brain, "/tmp");
+  const nameIdx = result.indexOf("**name:**");
+  const roleIdx = result.indexOf("**role:**");
+  assert(nameIdx < roleIdx, "keys sorted: name before role");
 }
 
 // ── Summary ───────────────────────────────────────────────────────

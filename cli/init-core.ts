@@ -7,9 +7,9 @@
  */
 
 import { readFileSync, existsSync, readdirSync } from "node:fs";
-import { resolve, dirname, basename } from "node:path";
+import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { platform as osPlatform, homedir, arch as osArch } from "node:os";
+import { platform as osPlatform, arch as osArch } from "node:os";
 
 // ---- Types ----
 
@@ -37,7 +37,7 @@ export interface SymlinkEntry {
 }
 
 export interface BootstrapPlan {
-  /** Template files to create in ~/.rho/ (filename -> content). Never overwrites. */
+  /** Config files to create in ~/.rho/ (filename -> content). Never overwrites. */
   filesToCreate: Map<string, string>;
   /** Brain default files to copy: source path -> target path. Never overwrites. */
   brainFilesToCopy: Map<string, string>;
@@ -71,11 +71,10 @@ export interface PlanBootstrapInput {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..");
 const TEMPLATES_DIR = resolve(REPO_ROOT, "templates");
-const SOUL_TEMPLATE = resolve(REPO_ROOT, "SOUL.md.template");
 
 // ---- Config files that init manages ----
 
-const CONFIG_FILES = ["init.toml", "packages.toml", "SOUL.md"] as const;
+const CONFIG_FILES = ["init.toml", "packages.toml"] as const;
 const DATA_DIRS = ["brain", "vault"] as const;
 
 // ---- Platform detection ----
@@ -116,15 +115,6 @@ export function generateInitToml(name: string): string {
 }
 
 /**
- * Generate SOUL.md content with the agent name substituted.
- * Reads the SOUL.md.template and replaces {{NAME}} placeholders.
- */
-export function generateSoulMd(name: string): string {
-  const template = readFileSync(SOUL_TEMPLATE, "utf-8");
-  return template.replace(/\{\{NAME\}\}/g, name);
-}
-
-/**
  * Generate packages.toml content. Currently just returns the template as-is
  * since it has no name-dependent content.
  */
@@ -159,12 +149,6 @@ export function planInit(input: PlanInitInput): InitPlan {
     existingConfigs.push("packages.toml");
   }
 
-  if (!existingFiles.has("SOUL.md")) {
-    filesToCreate.set("SOUL.md", generateSoulMd(name));
-  } else {
-    existingConfigs.push("SOUL.md");
-  }
-
   // Data directories are always in the plan (mkdir -p is idempotent)
   const dirsToCreate = [...DATA_DIRS];
 
@@ -194,15 +178,16 @@ export function planBootstrap(input: PlanBootstrapInput): BootstrapPlan {
   const filesToCreate = new Map<string, string>();
   const skipped: string[] = [];
 
-  // AGENTS.md, RHO.md, HEARTBEAT.md removed — brain.jsonl is now the single source of truth.
-  // Identity/behavior data lives in brain entries; heartbeat reads reminders/tasks from brain.
+  // Config files (init.toml, packages.toml) are handled by planInit
+  // AGENTS.md, SOUL.md, RHO.md, HEARTBEAT.md removed — brain.jsonl is now the single source of truth.
+  // Identity/behavior/principles live as entries in brain.jsonl.
 
   // ---- Brain defaults ----
   const brainFilesToCopy = new Map<string, string>();
   const brainDefaultsDir = resolve(REPO_ROOT, "brain");
   if (existsSync(brainDefaultsDir)) {
     for (const f of readdirSync(brainDefaultsDir)) {
-      if (!f.endsWith(".jsonl.default")) continue;
+      if (!f.endsWith(".default")) continue;
       const targetName = f.replace(".default", "");
       if (!existingBrainFiles.has(targetName)) {
         brainFilesToCopy.set(
@@ -270,47 +255,6 @@ export function planBootstrap(input: PlanBootstrapInput): BootstrapPlan {
     platformExtensionLinks,
     skipped,
   };
-}
-
-// ---- Template generation (AGENTS.md) ----
-
-/**
- * Generate AGENTS.md content with environment-specific variable substitution.
- */
-export function generateAgentsMd(name: string, piDir: string, rhoDir: string): string {
-  const HOME = process.env.HOME || homedir();
-  const brainDir = resolve(rhoDir, "brain");
-  const skillsDir = resolve(piDir, "skills");
-
-  let osString: string;
-  const platform = detectPlatform();
-  if (platform === "android") {
-    osString = `Android / Termux ${process.env.TERMUX_VERSION || ""}`.trim();
-  } else {
-    try {
-      const osRelease = readFileSync("/etc/os-release", "utf-8");
-      const match = osRelease.match(/^PRETTY_NAME="?([^"\n]*)"?/m);
-      osString = match?.[1] || process.platform;
-    } catch {
-      osString = process.platform === "darwin" ? "macOS" : process.platform;
-    }
-  }
-
-  const desc = "An AI agent powered by rho: persistent memory, heartbeat check-ins, and a knowledge vault.";
-  const shell = basename(process.env.SHELL || "sh");
-
-  const template = readFileSync(resolve(REPO_ROOT, "AGENTS.md.template"), "utf-8");
-  return template
-    .replace(/\{\{NAME\}\}/g, name)
-    .replace(/\{\{DESCRIPTION\}\}/g, desc)
-    .replace(/\{\{OS\}\}/g, osString)
-    .replace(/\{\{ARCH\}\}/g, osArch())
-    .replace(/\{\{SHELL\}\}/g, shell)
-    .replace(/\{\{HOME\}\}/g, HOME)
-    .replace(/\{\{CONFIG_PATH\}\}/g, piDir)
-    .replace(/\{\{BRAIN_PATH\}\}/g, brainDir)
-    .replace(/\{\{RHO_DIR\}\}/g, rhoDir)
-    .replace(/\{\{SKILLS_PATH\}\}/g, skillsDir);
 }
 
 // ---- Helpers ----

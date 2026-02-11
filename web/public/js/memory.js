@@ -58,7 +58,7 @@ document.addEventListener("alpine:init", () => {
           return entry.description || "";
         case "reminder":
           return (entry.text || entry.description || "") +
-            (entry.cadence ? " [" + (entry.cadence.kind === "interval" ? "every " + entry.cadence.every : "daily @ " + entry.cadence.at) + "]" : "");
+            (entry.cadence ? " [" + (entry.cadence.kind === "interval" ? "every " + entry.cadence.every : "daily @ " + entry.cadence["at"]) + "]" : "");
         default:
           return entry.text || entry.value || entry.description || entry.content || JSON.stringify(entry);
       }

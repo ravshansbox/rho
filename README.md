@@ -106,9 +106,9 @@ Inside a session:
 
 ## What it does
 
-The **heartbeat** checks in periodically (default: every 30 min). Each check-in reads your `~/.rho/RHO.md` checklist and `~/.rho/HEARTBEAT.md` scheduled tasks, runs what needs running, and reports back.
+The **heartbeat** checks in periodically (default: every 30 min). Each check-in reads reminders and tasks from the **brain**, runs what needs running, and reports back.
 
-The **brain** persists across sessions. Learnings, preferences, and context accumulate in `~/.rho/brain/`.
+The **brain** persists across sessions as a single `brain.jsonl` file. It stores behaviors, identity, learnings, preferences, tasks, reminders, and context — everything the agent needs to remember.
 
 **Agent email** gives your agent a real email address at `name@rhobot.dev`. People and services can email your agent directly. The agent polls its inbox, reads messages, and can reply. Free tier gets receive + 1 outbound email per hour. Register with:
 
@@ -144,7 +144,7 @@ Or use the `/email` command once registered:
 | `tasker-xml` | ✓ | | | Create Tasker automations |
 | `rho-cloud-onboard` | ✓ | ✓ | ✓ | Register an agent email address |
 | `rho-cloud-email` | ✓ | ✓ | ✓ | Manage agent email address |
-| `soul-update` | ✓ | ✓ | ✓ | Mine sessions to evolve SOUL.md |
+| `memory-clean` | ✓ | ✓ | ✓ | Consolidate memory, decay stale entries, optional session mining |
 | `update-pi` | ✓ | ✓ | ✓ | Update pi to latest version |
 
 ### Extensions
@@ -171,58 +171,52 @@ If the agent can already do it and just needs to know how, write a skill. If you
 
 ## Customize
 
-### RHO.md
-
-Your checklist. The heartbeat reads this on every check-in.
-
-```markdown
-# RHO Checklist
-
-## Quick Scan
-- [ ] Any unread notifications?
-- [ ] Battery below 20%?
-
-## Active Work  
-- [ ] Check build status on ~/projects/myapp
-
-## Recurring
-- [ ] Run ~/backup.sh every 6 hours
-```
-
-### HEARTBEAT.md
-
-Time-based triggers.
-
-```markdown
-# Heartbeat Tasks
-
-## Weather
-- Schedule: 8am daily
-- Action: Check weather and notify if rain expected
-
-## Journal
-- Schedule: 9pm daily
-- Action: Write daily journal entry to ~/.rho/vault/log/
-```
-
-### SOUL.md
-
-Your agent's voice and identity. Who it is, what it cares about, how it talks.
-
-Lives at `~/.rho/SOUL.md`.
-
 ### Brain
 
-Lives at `~/.rho/brain/`:
+Everything lives in `~/.rho/brain/brain.jsonl` — a single append-only log of structured entries:
 
-- `core.jsonl` -- Behavior, identity
-- `memory.jsonl` -- Learnings and preferences (grows over time)
-- `context.jsonl` -- Project-specific context
-- `memory/YYYY-MM-DD.md` -- Daily memory log
+| Type | Stores |
+|---|---|
+| `behavior` | How the agent acts (do, don't, value) |
+| `identity` | Who the agent is |
+| `user` | Facts about the user |
+| `preference` | User likes/dislikes by category |
+| `learning` | Things discovered in sessions |
+| `context` | Project-specific settings |
+| `task` | Checklist items |
+| `reminder` | Time-based triggers |
 
-Unused learnings are automatically archived after 90 days of decay.
+**Modify via the brain tool:**
+```
+/brain                           # Open memory viewer
+brain action=add type=behavior category=do text="..."
+brain action=add type=reminder text="Check weather" cadence={kind:"daily",at:"08:00"}
+brain action=add type=task text="Review PRs" priority=high
+```
 
-Use the `memory` tool or `/brain` command to interact with it.
+**Or edit directly** (the file is plain JSONL, one entry per line).
+
+### Auto-extraction
+
+The `memory-clean` skill runs automatically to:
+- **Decay** stale learnings (>90 days, low score)
+- **Consolidate** duplicates and merge related entries
+- **Mine sessions** for new learnings and preferences
+
+Run manually:
+```
+Run memory-clean with session mining
+```
+
+### Vault
+
+For reference material that needs structure (architecture docs, research, project overviews), use the vault:
+
+```
+vault write slug=my-project-arch type=concept
+```
+
+Creates markdown notes with wikilinks in `~/.rho/vault/`.
 
 ## Tasker setup (Android, optional)
 
@@ -271,8 +265,7 @@ rho/
 │   ├── rho-cloud-email/
 │   ├── rho-cloud-onboard/
 │   ├── session-search/
-│   ├── update-pi/
-│   └── soul-update/
+│   └── update-pi/
 ├── platforms/               # Platform-only local skills/extensions installed by install.sh
 │   ├── android/
 │   │   ├── extensions/      # tasker.ts
@@ -286,15 +279,11 @@ rho/
 │       └── setup.sh
 ├── configs/                 # Configuration files
 │   └── tmux-rho.conf        # SSH-friendly tmux config (used by rho's tmux socket)
-├── brain/                   # Default brain files
+├── brain/                   # Default brain.jsonl with core behaviors
 ├── tasker/                  # Importable Tasker profiles (Android)
 ├── SKILL.md                 # Portable install skill (works with any agent)
 ├── bootstrap.sh             # Universal installer (curl | bash)
-├── install.sh               # Cross-platform installer (platform extras + rho init/sync)
-├── AGENTS.md.template       # Agent operating principles
-├── RHO.md.template          # Check-in checklist
-├── HEARTBEAT.md.template    # Scheduled tasks
-└── SOUL.md.template         # Personality/voice
+└── install.sh               # Cross-platform installer (platform extras + rho init/sync)
 ```
 
 ## Configuration
