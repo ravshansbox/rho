@@ -1,5 +1,6 @@
 # rho
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/mikeyobrien/rho)
 [![@tau_rho_ai](https://img.shields.io/badge/@tau__rho__ai-000000?logo=x)](https://x.com/tau_rho_ai)
 
 An AI agent that stays running, remembers what you told it yesterday, and checks in on its own. Runs on macOS, Linux, and Android.
