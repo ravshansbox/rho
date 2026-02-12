@@ -890,7 +890,7 @@ interface RhoDetails {
 const DEFAULT_INTERVAL_MS = 30 * 60 * 1000;
 const MIN_INTERVAL_MS = 5 * 60 * 1000;
 const MAX_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const DEFAULT_SESSION_NAME = "rho";
+const DEFAULT_SESSION_NAME = readAgentName();
 const HEARTBEAT_WINDOW_NAME = "heartbeat";
 const MAX_WINDOW_NAME = 50;
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -2443,10 +2443,10 @@ Instructions:
     pi.registerTool({
       name: "rho_subagent",
       label: "Subagent",
-      description: "Run a pi subagent in a new tmux window (session 'rho' by default). Default mode is interactive; print mode writes results to ~/.rho/results.",
+      description: `Run a pi subagent in a new tmux window (session '${DEFAULT_SESSION_NAME}' by default). Default mode is interactive; print mode writes results to ~/.rho/results.`,
       parameters: Type.Object({
         prompt: Type.String({ description: "Prompt to run in the subagent" }),
-        session: Type.Optional(Type.String({ description: "tmux session name (default: rho)" })),
+        session: Type.Optional(Type.String({ description: `tmux session name (default: ${DEFAULT_SESSION_NAME})` })),
         window: Type.Optional(Type.String({ description: "tmux window name (auto-generated if omitted)" })),
         mode: Type.Optional(StringEnum(["interactive", "print"] as const)),
         outputFile: Type.Optional(Type.String({ description: "Output file path (print mode only; default: ~/.rho/results/<timestamp>.json)" })),
@@ -2585,124 +2585,7 @@ Instructions:
     },
   });
 
-  // ── Command: /tasks ────────────────────────────────────────────────────────
-
-  if (!IS_SUBAGENT) {
-    pi.registerCommand("tasks", {
-      description: "Task queue: /tasks (list), /tasks add <desc>, /tasks done <id>, /tasks update <id> <desc>, /tasks clear, /tasks all",
-      handler: async (args, ctx) => {
-        const parts = args.trim().split(/\s+/);
-        const subcmd = parts[0] || "";
-        const rest = parts.slice(1).join(" ");
-
-        switch (subcmd) {
-          case "":
-          case "list": {
-            const result = await handleBrainAction(BRAIN_PATH, { action: "list", type: "task", filter: "pending" });
-            ctx.ui.notify(result.message || "No pending tasks.", "info");
-            break;
-          }
-          case "all": {
-            const result = await handleBrainAction(BRAIN_PATH, { action: "list", type: "task" });
-            ctx.ui.notify(result.message || "No tasks.", "info");
-            break;
-          }
-          case "add": {
-            if (!rest.trim()) { ctx.ui.notify("Usage: /tasks add <description>", "warning"); return; }
-            const result = await handleBrainAction(BRAIN_PATH, { action: "add", type: "task", description: rest });
-            brainCache = null;
-            ctx.ui.notify(result.message, result.ok ? "success" : "error");
-            break;
-          }
-          case "done": {
-            if (!rest.trim()) { ctx.ui.notify("Usage: /tasks done <id>", "warning"); return; }
-            const result = await handleBrainAction(BRAIN_PATH, { action: "task_done", id: rest.trim() });
-            brainCache = null;
-            ctx.ui.notify(result.message, result.ok ? "success" : "error");
-            break;
-          }
-          case "remove":
-          case "rm": {
-            if (!rest.trim()) { ctx.ui.notify("Usage: /tasks remove <id>", "warning"); return; }
-            const result = await handleBrainAction(BRAIN_PATH, { action: "remove", id: rest.trim(), type: "task", reason: "removed via /tasks" });
-            brainCache = null;
-            ctx.ui.notify(result.message, result.ok ? "success" : "error");
-            break;
-          }
-          case "update": {
-            const updateId = parts[1];
-            const newDesc = parts.slice(2).join(" ");
-            if (!updateId) { ctx.ui.notify("Usage: /tasks update <id> [new description]", "warning"); return; }
-            const result = await handleBrainAction(BRAIN_PATH, { action: "update", id: updateId.trim(), description: newDesc.trim() || undefined });
-            brainCache = null;
-            ctx.ui.notify(result.message, result.ok ? "success" : "error");
-            break;
-          }
-          case "clear": {
-            const result = await handleBrainAction(BRAIN_PATH, { action: "task_clear" });
-            brainCache = null;
-            ctx.ui.notify(result.message, result.ok ? "success" : "error");
-            break;
-          }
-          default:
-            ctx.ui.notify("Usage: /tasks [add <desc> | done <id> | remove <id> | update <id> <desc> | clear | all]", "warning");
-        }
-      },
-    });
-  }
-
-  // ── Command: /vault ────────────────────────────────────────────────────────
-
-  pi.registerCommand("vault", {
-    description: "Vault dashboard & inbox (usage: /vault [inbox])",
-    handler: async (_args, ctx) => {
-      const [subcmd] = _args.trim().split(/\s+/);
-
-      switch (subcmd) {
-        case "inbox": {
-          const inboxPath = path.join(VAULT_DIR, "_inbox.md");
-          if (!fs.existsSync(inboxPath)) {
-            ctx.ui.notify("Inbox empty.", "info");
-            break;
-          }
-          const content = fs.readFileSync(inboxPath, "utf-8");
-          // Split on --- separators, skip the header
-          const entries = content.split(/^---$/m).slice(1).map(e => e.trim()).filter(Boolean);
-          if (entries.length === 0) {
-            ctx.ui.notify("Inbox empty.", "info");
-            break;
-          }
-          // Show count and first few items truncated
-          const preview = entries.slice(0, 5).map((e, i) => {
-            const firstLine = e.split("\n").find(l => l.trim() && !l.startsWith(">") && !l.startsWith("**")) || e.split("\n")[0];
-            const text = firstLine.trim();
-            return `${i + 1}. ${text.length > 60 ? text.slice(0, 57) + "..." : text}`;
-          });
-          const more = entries.length > 5 ? `\n  (+${entries.length - 5} more)` : "";
-          ctx.ui.notify(`Inbox (${entries.length}):\n${preview.join("\n")}${more}`, "info");
-          break;
-        }
-        case "":
-        case undefined: {
-          rebuildVaultGraph();
-          const status = getVaultStatus(VAULT_DIR, vaultGraph);
-          const typeCounts = Object.entries(status.byType).map(([t, n]) => `${n} ${t}`).join(", ");
-          const parts = [
-            `${status.totalNotes} notes`,
-            typeCounts ? `(${typeCounts})` : "",
-            `${status.orphanCount} orphans`,
-            `${status.inboxItems} inbox`,
-            `avg ${status.avgLinksPerNote.toFixed(1)} links/note`,
-          ].filter(Boolean);
-          ctx.ui.notify(`Vault: ${parts.join(" | ")}`, "info");
-          break;
-        }
-        default:
-          ctx.ui.notify("Usage: /vault [inbox]", "info");
-          break;
-      }
-    },
-  });
+  // /tasks and /vault commands owned by their TUI extensions (extensions/tasks, extensions/vault-search-tui)
 
   // ── Command: /subagents ──────────────────────────────────────────────────────
 
@@ -2711,8 +2594,8 @@ Instructions:
       description: "List active subagent tmux windows",
       handler: async (_args, ctx) => {
         try {
-          const sessionName = "rho";
-          // List windows in the rho session, using the dedicated socket
+          const sessionName = DEFAULT_SESSION_NAME;
+          // List windows in the agent session, using the dedicated socket
           const result = execSync(
             `tmux -L ${shellEscape(sessionName)} list-windows -t ${shellEscape(sessionName)} -F "#{window_index}:#{window_name}:#{pane_dead}"`,
             { encoding: "utf-8" }
