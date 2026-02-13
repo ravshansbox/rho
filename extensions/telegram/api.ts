@@ -50,6 +50,11 @@ export interface SendMessageParams {
   disable_web_page_preview?: boolean;
 }
 
+export interface SendChatActionParams {
+  chat_id: number;
+  action: "typing" | "upload_photo" | "record_video" | "upload_video" | "record_voice" | "upload_voice" | "upload_document" | "choose_sticker" | "find_location" | "record_video_note" | "upload_video_note";
+}
+
 export class TelegramApiError extends Error {
   public readonly status: number;
   public readonly retryAfterSeconds?: number;
@@ -79,6 +84,10 @@ export class TelegramClient {
 
   async sendMessage(params: SendMessageParams): Promise<TelegramMessage> {
     return this.call<TelegramMessage>("sendMessage", params);
+  }
+
+  async sendChatAction(params: SendChatActionParams): Promise<boolean> {
+    return this.call<boolean>("sendChatAction", params);
   }
 
   private async call<T>(method: string, body: Record<string, unknown>): Promise<T> {

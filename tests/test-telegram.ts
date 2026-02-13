@@ -172,6 +172,22 @@ try {
         gotRateLimit = error instanceof TelegramApiError && error.retryAfterSeconds === 2;
       }
       assert(gotRateLimit, "sendMessage surfaces retry_after on 429");
+
+      globalThis.fetch = (async (_url: string, _init?: any) => {
+        return {
+          ok: true,
+          status: 200,
+          async json() {
+            return {
+              ok: true,
+              result: true,
+            };
+          },
+        } as any;
+      }) as any;
+
+      const typing = await client.sendChatAction({ chat_id: 1, action: "typing" });
+      assert(typing === true, "sendChatAction returns true on success");
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -312,6 +328,132 @@ try {
     const runner = new TelegramRpcRunner(fakeSpawn as any);
     const response = await runner.runPrompt("/tmp/fake-session.jsonl", "hello", 2000);
     assert(response === "ok from rpc", "RPC runner returns assistant text from message_end");
+    runner.dispose();
+  }
+
+  console.log("\n-- RPC stderr handling (warnings vs fatal) --");
+  {
+    const warningSpawn = ((_cmd: string, _args: string[]) => {
+      const child = new EventEmitter() as any;
+      const stdout = new PassThrough();
+      const stderr = new PassThrough();
+      const stdin: any = {
+        destroyed: false,
+        writable: true,
+        write: (line: string) => {
+          const payload = JSON.parse(String(line).trim());
+          if (payload.type === "prompt") {
+            setTimeout(() => {
+              stderr.write("(node:123) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n");
+              stderr.write("(Use `node --trace-warnings ...` to show where the warning was created)\n");
+              stdout.write(
+                JSON.stringify({
+                  type: "message_end",
+                  message: { role: "assistant", content: [{ type: "text", text: "warning ignored" }] },
+                }) + "\n"
+              );
+              stdout.write(JSON.stringify({ type: "agent_end" }) + "\n");
+            }, 5);
+          }
+          return true;
+        },
+      };
+      child.stdin = stdin;
+      child.stdout = stdout;
+      child.stderr = stderr;
+      child.kill = () => {
+        child.emit("exit", 0, null);
+        return true;
+      };
+      return child;
+    }) as any;
+
+    const warningRunner = new TelegramRpcRunner(warningSpawn);
+    const warningResponse = await warningRunner.runPrompt("/tmp/fake-warning-session.jsonl", "hello", 2000);
+    assert(warningResponse === "warning ignored", "ignores known non-fatal sqlite warning stderr");
+    warningRunner.dispose();
+
+    const fatalSpawn = ((_cmd: string, _args: string[]) => {
+      const child = new EventEmitter() as any;
+      const stdout = new PassThrough();
+      const stderr = new PassThrough();
+      const stdin: any = {
+        destroyed: false,
+        writable: true,
+        write: (line: string) => {
+          const payload = JSON.parse(String(line).trim());
+          if (payload.type === "prompt") {
+            setTimeout(() => {
+              stderr.write("Fatal RPC crash\n");
+            }, 5);
+          }
+          return true;
+        },
+      };
+      child.stdin = stdin;
+      child.stdout = stdout;
+      child.stderr = stderr;
+      child.kill = () => {
+        child.emit("exit", 0, null);
+        return true;
+      };
+      return child;
+    }) as any;
+
+    const fatalRunner = new TelegramRpcRunner(fatalSpawn);
+    let fatalRejected = false;
+    try {
+      await fatalRunner.runPrompt("/tmp/fake-fatal-session.jsonl", "hello", 2000);
+    } catch (error) {
+      fatalRejected = String((error as Error)?.message || "").includes("RPC stderr");
+    }
+    assert(fatalRejected, "rejects on non-ignorable stderr");
+    fatalRunner.dispose();
+  }
+
+  console.log("\n-- RPC child env isolation --");
+  {
+    let capturedEnv: Record<string, string> | undefined;
+    const capturingSpawn = ((_cmd: string, _args: string[], opts?: any) => {
+      capturedEnv = opts?.env as Record<string, string> | undefined;
+
+      const child = new EventEmitter() as any;
+      const stdout = new PassThrough();
+      const stderr = new PassThrough();
+      const stdin: any = {
+        destroyed: false,
+        writable: true,
+        write: (line: string) => {
+          const payload = JSON.parse(String(line).trim());
+          if (payload.type === "prompt") {
+            setTimeout(() => {
+              stdout.write(
+                JSON.stringify({
+                  type: "message_end",
+                  message: { role: "assistant", content: [{ type: "text", text: "env ok" }] },
+                }) + "\n"
+              );
+              stdout.write(JSON.stringify({ type: "agent_end" }) + "\n");
+            }, 5);
+          }
+          return true;
+        },
+      };
+      child.stdin = stdin;
+      child.stdout = stdout;
+      child.stderr = stderr;
+      child.kill = () => {
+        child.emit("exit", 0, null);
+        return true;
+      };
+      return child;
+    }) as any;
+
+    const runner = new TelegramRpcRunner(capturingSpawn);
+    const response = await runner.runPrompt("/tmp/fake-env-session.jsonl", "hello", 2000);
+    assert(response === "env ok", "rpc still works with env isolation");
+    assert(capturedEnv?.RHO_TELEGRAM_DISABLE === "1", "RPC child disables telegram polling without disabling other extensions");
+    assert(capturedEnv?.RHO_SUBAGENT !== "1", "RPC child does not force global subagent mode");
     runner.dispose();
   }
 

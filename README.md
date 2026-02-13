@@ -126,6 +126,49 @@ Or use the `/email` command once registered:
 /email send <to> <subject>   Send a quick email
 ```
 
+**Telegram channel adapter** lets the agent receive prompts from Telegram and reply in-thread.
+
+Quick setup:
+
+```bash
+# 1) Set bot token in your shell profile
+export TELEGRAM_BOT_TOKEN="<bot-token>"
+
+# 2) Enable in ~/.rho/init.toml
+# [settings.telegram]
+# enabled = true
+
+rho sync
+rho start
+```
+
+Operator controls:
+
+```
+/telegram status
+/telegram check
+/telegram allow-chat <chat_id>
+/telegram allow-user <user_id>
+```
+
+Security model (MVP):
+- Polling-only transport (`getUpdates`) with durable offset state
+- Optional `allowed_chat_ids` / `allowed_user_ids` gates
+- Group activation gate via `require_mention_in_groups`
+- Bounded retries for transient send failures and 429 rate-limits
+
+Rollout notes:
+- MVP is polling-first; webhook mode is reserved for future work
+- Keep allowlists tight before exposing in group chats
+- If the module is disabled (`settings.telegram.enabled = false`), it is idle/no-op
+
+Troubleshooting:
+- `Missing token env`: export `TELEGRAM_BOT_TOKEN` (or your configured `bot_token_env`)
+- No group replies: mention the bot (or set `require_mention_in_groups = false`)
+- Delivery delays: check `/telegram status` for retry/failure counters
+
+See full setup and smoke validation guide: [docs/telegram.md](docs/telegram.md).
+
 **Skills** are capability packages the agent loads on demand. The installer detects your OS and installs the right ones. Notifications, clipboard, and text-to-speech work on every platform. Android gets SMS, speech-to-text, camera, GPS, and Tasker automation on top of that.
 
 ### Skills
@@ -156,11 +199,11 @@ Or use the `/email` command once registered:
 | `rho/` | All | Heartbeat, memory, tasks, and vault tooling |
 | `brave-search/` | All | Web search via Brave API |
 | `x-search/` | All | X (Twitter) search via xAI Grok (`x_search`) |
-| `memory-viewer/` | All | Browse and search memories |
-| `usage-bars/` | All | Token/cost usage display |
-
+| `telegram/` | All | Telegram adapter (polling MVP, chat/session bridge, operator controls) |
 | `email/` | All | Agent inbox at name@rhobot.dev |
 | `vault-search/` | All | Full-text search over the vault (FTS + ripgrep fallback) |
+| `memory-viewer/` | All | Browse and search memories |
+| `usage-bars/` | All | Token/cost usage display |
 | `tasker.ts` | Android | UI automation via Tasker |
 
 ### Skills vs extensions

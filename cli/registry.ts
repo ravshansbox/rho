@@ -55,6 +55,12 @@ export const REGISTRY: Record<string, ModuleEntry> = {
     skills: [],
     description: "X/Twitter search via xAI Grok",
   },
+  telegram: {
+    category: "tools",
+    extensions: ["extensions/telegram"],
+    skills: [],
+    description: "Telegram channel adapter for chatting with your agent",
+  },
   email: {
     category: "tools",
     extensions: ["extensions/email"],

@@ -5,6 +5,7 @@ interface PendingPrompt {
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
   lastAssistantText: string;
+  stderrLines: string[];
 }
 
 interface RpcSessionState {
@@ -26,6 +27,22 @@ function extractAssistantText(message: any): string {
   return chunks.join("\n").trim();
 }
 
+function isIgnorableRpcStderr(message: string): boolean {
+  const line = message.trim();
+  if (!line) return true;
+  return (
+    /ExperimentalWarning: SQLite is an experimental feature/i.test(line)
+    || /\(Use `node --trace-warnings .+\)/i.test(line)
+    || /ExperimentalWarning/i.test(line)
+  );
+}
+
+function formatStderrSuffix(lines: string[]): string {
+  if (lines.length === 0) return "";
+  const joined = lines.slice(-8).join("\n");
+  return `\nRPC stderr:\n${joined}`;
+}
+
 export class TelegramRpcRunner {
   private readonly sessions = new Map<string, RpcSessionState>();
 
@@ -39,11 +56,12 @@ export class TelegramRpcRunner {
 
     return await new Promise<string>((resolve, reject) => {
       const timer = setTimeout(() => {
+        const stderrLines = session.pending?.stderrLines ?? [];
         session.pending = null;
-        reject(new Error(`RPC prompt timed out after ${Math.floor(timeoutMs / 1000)}s`));
+        reject(new Error(`RPC prompt timed out after ${Math.floor(timeoutMs / 1000)}s${formatStderrSuffix(stderrLines)}`));
       }, timeoutMs);
 
-      session.pending = { resolve, reject, timer, lastAssistantText: "" };
+      session.pending = { resolve, reject, timer, lastAssistantText: "", stderrLines: [] };
       this.sendCommand(session, { type: "prompt", message });
     });
   }
@@ -65,7 +83,11 @@ export class TelegramRpcRunner {
 
     const child = this.spawnProcess("pi", ["--mode", "rpc"], {
       stdio: ["pipe", "pipe", "pipe"],
-      env: process.env,
+      env: {
+        ...process.env,
+        // Prevent telegram polling inside RPC worker while keeping other extensions available.
+        RHO_TELEGRAM_DISABLE: "1",
+      },
     });
 
     const state: RpcSessionState = {
@@ -91,13 +113,12 @@ export class TelegramRpcRunner {
     });
 
     child.stderr.on("data", (chunk: string) => {
-      const message = String(chunk || "").trim();
-      if (!message) return;
-      if (state.pending) {
-        clearTimeout(state.pending.timer);
-        const { reject } = state.pending;
-        state.pending = null;
-        reject(new Error(`RPC stderr: ${message}`));
+      if (!state.pending) return;
+      for (const rawLine of String(chunk || "").split(/\r?\n/)) {
+        const line = rawLine.trim();
+        if (!line) continue;
+        if (isIgnorableRpcStderr(line)) continue;
+        state.pending.stderrLines.push(line);
       }
     });
 
@@ -106,7 +127,7 @@ export class TelegramRpcRunner {
       state.pending = null;
       if (pending) {
         clearTimeout(pending.timer);
-        pending.reject(new Error(`RPC exited (code=${code ?? "null"}, signal=${signal ?? "null"})`));
+        pending.reject(new Error(`RPC exited (code=${code ?? "null"}, signal=${signal ?? "null"})${formatStderrSuffix(pending.stderrLines)}`));
       }
       this.sessions.delete(sessionFile);
     });
@@ -160,7 +181,7 @@ export class TelegramRpcRunner {
       const pending = session.pending;
       session.pending = null;
       clearTimeout(pending.timer);
-      pending.reject(new Error(event.message || "RPC error"));
+      pending.reject(new Error(`${event.message || "RPC error"}${formatStderrSuffix(pending.stderrLines)}`));
     }
   }
 }

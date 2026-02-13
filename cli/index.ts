@@ -34,6 +34,7 @@ const COMMANDS: Record<string, CommandDef> = {
   trigger: { description: "Force an immediate heartbeat check-in",      load: () => import("./commands/trigger.ts") },
   config:  { description: "Show current configuration",                 load: () => import("./commands/config.ts") },
   logs:    { description: "Show recent heartbeat output",               load: () => import("./commands/logs.ts") },
+  telegram: { description: "Manage the Telegram worker",                 load: () => import("./commands/telegram.ts") },
   login:   { description: "Authenticate with pi providers",            load: () => import("./commands/login.ts") },
   web:     { description: "Launch the web UI server",                   load: () => import("./commands/web.ts") },
 };

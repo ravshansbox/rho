@@ -96,6 +96,37 @@ console.log("\n--- no clobber on inode change ---");
   }
 }
 
+// ==================================================
+// 2. Repeated refresh writes valid JSON at start-of-file (no null-prefix corruption)
+// ==================================================
+console.log("\n--- refresh writes from offset 0 ---");
+
+{
+  const lockPath = setup();
+  const now = Date.now();
+
+  const a = tryAcquireLeaseLock(lockPath, "nonce-refresh", now, { staleMs: 60_000, purpose: "test" });
+  assert(a.ok, "A acquired lock for refresh test");
+  if (a.ok) {
+    const refreshed1 = a.lease.refresh(now + 100);
+    const refreshed2 = a.lease.refresh(now + 200);
+    assertEq(refreshed1, true, "first refresh succeeds");
+    assertEq(refreshed2, true, "second refresh succeeds");
+
+    const payload = readLeasePayload(lockPath);
+    assert(payload !== null, "payload remains parseable after repeated refresh");
+    if (payload) {
+      assertEq(payload.nonce, "nonce-refresh", "nonce remains intact after refresh");
+    }
+
+    const raw = fs.readFileSync(lockPath, "utf-8");
+    assert(!raw.startsWith("\u0000"), "lock file does not start with NUL after refresh");
+
+    a.lease.release();
+    cleanup();
+  }
+}
+
 // ---- Summary ----
 console.log(`\nSummary: ${PASS} passed, ${FAIL} failed`);
 if (FAIL > 0) process.exitCode = 1;

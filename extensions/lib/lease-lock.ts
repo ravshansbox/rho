@@ -129,7 +129,7 @@ function tryCreateExclusiveFd(lockPath: string, content: string): { ok: true; fd
     ensureDirForFile(lockPath);
     const fd = fs.openSync(lockPath, fs.constants.O_RDWR | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
     try {
-      fs.writeSync(fd, content);
+      fs.writeSync(fd, content, 0, "utf-8");
       // Best-effort: flush so other processes see a complete JSON payload.
       try { fs.fsyncSync(fd); } catch { /* ignore */ }
       const st = fs.fstatSync(fd);
@@ -149,7 +149,7 @@ function tryCreateExclusiveFd(lockPath: string, content: string): { ok: true; fd
 function writeLeaseInPlace(fd: number, content: string): boolean {
   try {
     fs.ftruncateSync(fd, 0);
-    fs.writeSync(fd, content);
+    fs.writeSync(fd, content, 0, "utf-8");
     try { fs.fsyncSync(fd); } catch { /* ignore */ }
     return true;
   } catch {

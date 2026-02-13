@@ -21,6 +21,7 @@ vault = true                          # Knowledge vault with full-text search an
 [modules.tools]
 brave-search = true                   # Web search via Brave Search API
 x-search = true                       # X/Twitter search via xAI Grok
+telegram = true                       # Telegram channel adapter (polling-first)
 email = false                         # Agent email via Rho Cloud (rhobot.dev)
 subagents = true                      # Subagent delegation with chains, parallel, and async
 agent-sop = true                      # Standard Operating Procedures for structured agent workflows
@@ -45,6 +46,15 @@ interval = "30m"                      # Check-in interval (e.g., "15m", "1h", "2
 # tmux_socket = "rho"                 # Name of the dedicated tmux socket (passed as: tmux -L <socket>)
 # tmux_config = "builtin"             # "builtin" = use the tmux config shipped with your installed rho version
 # tmux_config = "~/.rho/tmux.conf"    # Or set an explicit path to your own tmux config
+
+[settings.telegram]
+enabled = false                       # Enable Telegram channel adapter
+mode = "polling"                     # polling (MVP) | webhook (future)
+bot_token_env = "TELEGRAM_BOT_TOKEN" # Env var containing bot token
+poll_timeout_seconds = 30             # Long-poll timeout for getUpdates
+allowed_chat_ids = []                 # Optional allowlist of chat IDs
+allowed_user_ids = []                 # Optional allowlist of Telegram user IDs
+require_mention_in_groups = true      # Ignore group chatter unless activated
 
 [settings.email]
 # handle = ""                         # Your rhobot.dev email handle

@@ -42,6 +42,13 @@
     "@mariozechner/pi-tui": "*",
     "@sinclair/typebox": "*"
   },
+  "scripts": {
+    "build": "printf '%s\n' 'no build step'",
+    "lint": "printf '%s\n' 'no lint step'",
+    "typecheck": "printf '%s\n' 'no typecheck step'",
+    "test": "for f in tests/test-*.ts; do if [ \"$f\" = \"tests/test-vault.ts\" ]; then continue; fi; npx -y tsx \"$f\" || exit 1; done",
+    "telegram:smoke": "npx -y tsx scripts/telegram-smoke.ts"
+  },
   "dependencies": {
     "@hono/node-server": "^1.13.1",
     "@hono/node-ws": "^1.0.7",

@@ -9,6 +9,7 @@ export const INIT_TOML = join(RHO_HOME, "init.toml");
 export const TELEGRAM_DIR = join(RHO_HOME, "telegram");
 export const TELEGRAM_STATE_PATH = join(TELEGRAM_DIR, "state.json");
 export const TELEGRAM_POLL_LOCK_PATH = join(TELEGRAM_DIR, "poll.lock.json");
+export const TELEGRAM_WORKER_LOCK_PATH = join(TELEGRAM_DIR, "worker.lock.json");
 export const TELEGRAM_CHECK_TRIGGER_PATH = join(TELEGRAM_DIR, "check.trigger.json");
 
 export interface TelegramSettings {
