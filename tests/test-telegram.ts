@@ -28,6 +28,12 @@ import {
   releaseTelegramPollLeadership,
   stepTelegramPollLeadership,
 } from "../extensions/telegram/poll-leadership.ts";
+import {
+  consumeTelegramCheckTrigger,
+  getTelegramCheckTriggerState,
+  requestTelegramCheckTrigger,
+} from "../extensions/telegram/check-trigger.ts";
+import { renderTelegramStatusText, renderTelegramUiStatus } from "../extensions/telegram/status.ts";
 
 let PASS = 0;
 let FAIL = 0;
@@ -460,6 +466,92 @@ try {
     assert(staleTakeover.isLeader === true, "stale lock is taken over by live contender");
 
     releaseTelegramPollLeadership(staleTakeoverState);
+  }
+
+  console.log("\n-- operator check trigger request/consume --");
+  {
+    const triggerPath = join(tmp, "telegram", "check.trigger.json");
+
+    const requested = requestTelegramCheckTrigger(triggerPath, {
+      requestedAt: Date.now(),
+      requesterPid: 2222,
+      source: "tool",
+      requesterRole: "follower",
+    });
+    assert(requested === true, "follower check request persists trigger payload");
+
+    const pending = getTelegramCheckTriggerState(triggerPath, 0);
+    assert(pending.pending === true, "pending trigger is visible for status surfaces");
+    assert(pending.requesterPid === 2222, "pending trigger exposes requester pid");
+
+    const consumed = consumeTelegramCheckTrigger(triggerPath, 0);
+    assert(consumed.triggered === true, "leader consumes follower check trigger");
+    assert(consumed.request?.requesterPid === 2222, "consumed trigger returns requester metadata");
+
+    const consumedAgain = consumeTelegramCheckTrigger(triggerPath, consumed.nextSeen);
+    assert(consumedAgain.triggered === false, "consumed trigger is not replayed without a new request");
+  }
+
+  console.log("\n-- operator status rendering includes leadership/trigger health --");
+  {
+    const status = renderTelegramStatusText({
+      enabled: true,
+      mode: "polling",
+      leadershipText: "follower (leader pid 4321 @host)",
+      pollLockPath: "/tmp/poll.lock.json",
+      pollLockOwnerText: "4321 @host",
+      triggerPath: "/tmp/check.trigger.json",
+      triggerPending: true,
+      triggerRequesterPid: 2222,
+      triggerRequestedAt: 1_700_000_000_000,
+      lastCheckRequestAt: 1_700_000_000_100,
+      lastCheckConsumeAt: 1_700_000_000_200,
+      lastCheckOutcome: "ok",
+      tokenEnv: "TELEGRAM_BOT_TOKEN",
+      lastUpdateId: 12,
+      lastPollAt: "2026-02-13T00:00:00.000Z",
+      pollFailures: 0,
+      sendFailures: 1,
+      pendingInbound: 2,
+      pendingOutbound: 3,
+      allowedChatsText: "all",
+      allowedUsersText: "all",
+    });
+
+    assert(status.includes("Leadership: follower (leader pid 4321 @host)"), "status includes leadership role + owner context");
+    assert(status.includes("Check trigger pending: yes"), "status includes trigger pending context");
+    assert(status.includes("Last check outcome: ok"), "status includes check execution outcome");
+
+    const ui = renderTelegramUiStatus({
+      mode: "polling",
+      isLeader: false,
+      ownerPid: 4321,
+      lastUpdateId: 12,
+      pendingInbound: 2,
+      pendingOutbound: 3,
+      pollFailures: 1,
+      sendFailures: 0,
+      triggerPending: true,
+    });
+
+    assert(ui.includes("F4321"), "ui status includes follower owner pid context");
+    assert(ui.includes("tr!"), "ui status includes trigger pending marker");
+    assert(ui.includes("pf1"), "ui status includes poll health context");
+  }
+
+  console.log("\n-- operator check event logging --");
+  {
+    const logPath = join(tmp, "telegram", "operator-events.jsonl");
+    appendTelegramLog({ event: "operator_check_requested", route: "follower_trigger", requester_pid: 2222 }, logPath);
+    appendTelegramLog({ event: "operator_check_trigger_consumed", requester_pid: 2222, consumed_by_pid: 1111 }, logPath);
+    appendTelegramLog({ event: "operator_check_executed", executed_by_pid: 1111, result: "ok" }, logPath);
+
+    const events = readFileSync(logPath, "utf-8").trim().split("\n").map((line) => JSON.parse(line) as any);
+    assert(events[0].event === "operator_check_requested", "log includes operator_check_requested event");
+    assert(events[0].route === "follower_trigger", "check request log preserves route metadata");
+    assert(events[1].event === "operator_check_trigger_consumed", "log includes trigger consumed event");
+    assert(events[2].event === "operator_check_executed", "log includes check executed event");
+    assert(events[2].result === "ok", "check executed log preserves outcome metadata");
   }
 
   console.log("\n-- mocked end-to-end pipeline --");

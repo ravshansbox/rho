@@ -13,6 +13,7 @@ import {
   markPollSuccess,
   readTelegramSettings,
   saveRuntimeState,
+  TELEGRAM_CHECK_TRIGGER_PATH,
   TELEGRAM_POLL_LOCK_PATH,
   type TelegramRuntimeState,
 } from "./lib.ts";
@@ -29,6 +30,12 @@ import {
   releaseTelegramPollLeadership,
   stepTelegramPollLeadership,
 } from "./poll-leadership.ts";
+import {
+  consumeTelegramCheckTrigger,
+  getTelegramCheckTriggerState,
+  requestTelegramCheckTrigger,
+} from "./check-trigger.ts";
+import { renderTelegramStatusText, renderTelegramUiStatus } from "./status.ts";
 
 const DEFAULT_POLL_LOCK_REFRESH_MS = 15_000;
 const DEFAULT_POLL_LOCK_STALE_MS = 90_000;
@@ -68,6 +75,11 @@ export default function (pi: ExtensionAPI) {
   const pollLeadershipState = createTelegramPollLeadershipState();
   const pollLockNonce = `${process.pid}-${Math.random().toString(36).slice(2, 10)}`;
   let pollInFlight = false;
+  let checkTriggerSeenMtimeMs = 0;
+  let lastCheckRequestAtMs: number | null = null;
+  let lastCheckRequesterPid: number | null = null;
+  let lastCheckConsumeAtMs: number | null = null;
+  let lastCheckOutcome: "ok" | "error" | null = null;
 
   let runtimeState: TelegramRuntimeState = loadRuntimeState();
   let latestCtx: ExtensionContext | null = null;
@@ -135,10 +147,28 @@ export default function (pi: ExtensionAPI) {
     return "follower (no active leader)";
   };
 
-  const leadershipBadge = () => {
-    if (pollLeadershipState.isLeader) return "L";
-    if (pollLeadershipState.ownerPid) return `F${pollLeadershipState.ownerPid}`;
-    return "F";
+  const requestLeaderCheck = (source: "tool" | "command"): boolean => {
+    const requestedAt = Date.now();
+    const requested = requestTelegramCheckTrigger(TELEGRAM_CHECK_TRIGGER_PATH, {
+      requestedAt,
+      requesterPid: process.pid,
+      requesterRole: pollLeadershipState.isLeader ? "leader" : "follower",
+      source,
+    });
+
+    if (requested) {
+      lastCheckRequestAtMs = requestedAt;
+      lastCheckRequesterPid = process.pid;
+      logEvent("operator_check_requested", {}, {
+        route: pollLeadershipState.isLeader ? "leader_local" : "follower_trigger",
+        requested_at: requestedAt,
+        requester_pid: process.pid,
+        source,
+        owner_pid: readTelegramPollLockOwner(TELEGRAM_POLL_LOCK_PATH)?.pid ?? null,
+      });
+    }
+
+    return requested;
   };
 
   const applyAllowlistMutation = (target: "chat" | "user", action: "allow" | "revoke", id: number) => {
@@ -177,10 +207,23 @@ export default function (pi: ExtensionAPI) {
       setStatus(ctx, `tg send-err(${consecutiveSendFailures})`, "error");
       return;
     }
-    const mode = settings.mode === "webhook" ? "wh" : "poll";
+    const ownerPid = pollLeadershipState.isLeader
+      ? process.pid
+      : readTelegramPollLockOwner(TELEGRAM_POLL_LOCK_PATH)?.pid ?? pollLeadershipState.ownerPid;
+    const triggerState = getTelegramCheckTriggerState(TELEGRAM_CHECK_TRIGGER_PATH, checkTriggerSeenMtimeMs);
     setStatus(
       ctx,
-      `tg ${mode}${leadershipBadge()}#${runtimeState.last_update_id} in${pendingInbound.length} out${pendingOutbound.length}`,
+      renderTelegramUiStatus({
+        mode: settings.mode,
+        isLeader: pollLeadershipState.isLeader,
+        ownerPid,
+        lastUpdateId: runtimeState.last_update_id,
+        pendingInbound: pendingInbound.length,
+        pendingOutbound: pendingOutbound.length,
+        pollFailures: runtimeState.consecutive_failures,
+        sendFailures: consecutiveSendFailures,
+        triggerPending: triggerState.pending,
+      }),
       "dim",
     );
   };
@@ -361,10 +404,19 @@ export default function (pi: ExtensionAPI) {
     refreshStatus(ctx);
   };
 
-  const pollOnce = async (ctx: ExtensionContext, silent = true) => {
-    if (!settings.enabled || !client || settings.mode !== "polling") return;
-    if (!pollLeadershipState.isLeader) return;
-    if (pollInFlight) return;
+  const pollOnce = async (
+    ctx: ExtensionContext,
+    silent = true,
+  ): Promise<{ ok: boolean; updates: number; accepted: number; blocked: number; error?: string; skipped?: string }> => {
+    if (!settings.enabled || !client || settings.mode !== "polling") {
+      return { ok: false, updates: 0, accepted: 0, blocked: 0, skipped: "disabled_or_invalid_mode" };
+    }
+    if (!pollLeadershipState.isLeader) {
+      return { ok: false, updates: 0, accepted: 0, blocked: 0, skipped: "not_leader" };
+    }
+    if (pollInFlight) {
+      return { ok: false, updates: 0, accepted: 0, blocked: 0, skipped: "poll_in_flight" };
+    }
 
     pollInFlight = true;
     try {
@@ -439,6 +491,8 @@ export default function (pi: ExtensionAPI) {
           "info",
         );
       }
+
+      return { ok: true, updates: updates.length, accepted, blocked };
     } catch (error) {
       runtimeState = markPollFailure(runtimeState);
       persist();
@@ -451,6 +505,7 @@ export default function (pi: ExtensionAPI) {
       if (!silent && ctx.hasUI) {
         ctx.ui.notify(`Telegram poll failed: ${msg}`, "warning");
       }
+      return { ok: false, updates: 0, accepted: 0, blocked: 0, error: msg };
     } finally {
       pollInFlight = false;
       refreshStatus(ctx);
@@ -472,11 +527,35 @@ export default function (pi: ExtensionAPI) {
     }, intervalMs);
   };
 
+  const executeOperatorCheck = async (
+    ctx: ExtensionContext,
+    source: "tool" | "command" | "trigger",
+    options?: { requesterPid?: number | null; silent?: boolean },
+  ) => {
+    const result = await pollOnce(ctx, options?.silent ?? source === "trigger");
+    if (!result.skipped) {
+      lastCheckOutcome = result.ok ? "ok" : "error";
+    }
+    logEvent("operator_check_executed", {}, {
+      source,
+      requester_pid: options?.requesterPid ?? null,
+      executed_by_pid: process.pid,
+      result: result.ok ? "ok" : "error",
+      skipped: result.skipped ?? null,
+      updates: result.updates,
+      accepted: result.accepted,
+      blocked: result.blocked,
+      error: result.error,
+    });
+    return result;
+  };
+
   const runLeadershipStep = async (ctx: ExtensionContext) => {
+    const now = Date.now();
     const step = stepTelegramPollLeadership(pollLeadershipState, {
       lockPath: TELEGRAM_POLL_LOCK_PATH,
       nonce: pollLockNonce,
-      now: Date.now(),
+      now,
       staleMs: pollLockStaleMs,
     });
 
@@ -494,6 +573,26 @@ export default function (pi: ExtensionAPI) {
       });
     } else if (!step.isLeader) {
       stopPolling();
+    }
+
+    if (pollLeadershipState.isLeader) {
+      const consumed = consumeTelegramCheckTrigger(TELEGRAM_CHECK_TRIGGER_PATH, checkTriggerSeenMtimeMs);
+      checkTriggerSeenMtimeMs = consumed.nextSeen;
+      if (consumed.triggered) {
+        lastCheckConsumeAtMs = Date.now();
+        lastCheckRequesterPid = consumed.request?.requesterPid ?? null;
+        logEvent("operator_check_trigger_consumed", {}, {
+          consumed_by_pid: process.pid,
+          requester_pid: consumed.request?.requesterPid ?? null,
+          requester_role: consumed.request?.requesterRole ?? null,
+          requested_at: consumed.request?.requestedAt ?? null,
+          source: consumed.request?.source ?? null,
+        });
+        await executeOperatorCheck(ctx, "trigger", {
+          requesterPid: consumed.request?.requesterPid ?? null,
+          silent: true,
+        });
+      }
     }
 
     refreshStatus(ctx);
@@ -535,21 +634,30 @@ export default function (pi: ExtensionAPI) {
 
   const statusText = () => {
     const owner = readTelegramPollLockOwner(TELEGRAM_POLL_LOCK_PATH);
-    return [
-      `Telegram: ${settings.enabled ? "enabled" : "disabled"} (${settings.mode})`,
-      `Leadership: ${leadershipText()}`,
-      `Poll lock: ${TELEGRAM_POLL_LOCK_PATH}`,
-      `Poll lock owner: ${owner ? `${owner.pid} @${owner.hostname}` : "none"}`,
-      `Token env: ${settings.botTokenEnv}`,
-      `Last update id: ${runtimeState.last_update_id}`,
-      `Last poll: ${runtimeState.last_poll_at ?? "never"}`,
-      `Poll failures: ${runtimeState.consecutive_failures}`,
-      `Send failures: ${consecutiveSendFailures}`,
-      `Pending inbound queue: ${pendingInbound.length}`,
-      `Pending outbound queue: ${pendingOutbound.length}`,
-      `Allowed chats: ${runtimeAllowedChatIds.length === 0 ? "all" : runtimeAllowedChatIds.join(",")}`,
-      `Allowed users: ${runtimeAllowedUserIds.length === 0 ? "all" : runtimeAllowedUserIds.join(",")}`,
-    ].join("\n");
+    const triggerState = getTelegramCheckTriggerState(TELEGRAM_CHECK_TRIGGER_PATH, checkTriggerSeenMtimeMs);
+    return renderTelegramStatusText({
+      enabled: settings.enabled,
+      mode: settings.mode,
+      leadershipText: leadershipText(),
+      pollLockPath: TELEGRAM_POLL_LOCK_PATH,
+      pollLockOwnerText: owner ? `${owner.pid} @${owner.hostname}` : "none",
+      triggerPath: TELEGRAM_CHECK_TRIGGER_PATH,
+      triggerPending: triggerState.pending,
+      triggerRequesterPid: triggerState.requesterPid ?? lastCheckRequesterPid,
+      triggerRequestedAt: triggerState.requestedAt,
+      lastCheckRequestAt: lastCheckRequestAtMs,
+      lastCheckConsumeAt: lastCheckConsumeAtMs,
+      lastCheckOutcome,
+      tokenEnv: settings.botTokenEnv,
+      lastUpdateId: runtimeState.last_update_id,
+      lastPollAt: runtimeState.last_poll_at,
+      pollFailures: runtimeState.consecutive_failures,
+      sendFailures: consecutiveSendFailures,
+      pendingInbound: pendingInbound.length,
+      pendingOutbound: pendingOutbound.length,
+      allowedChatsText: runtimeAllowedChatIds.length === 0 ? "all" : runtimeAllowedChatIds.join(","),
+      allowedUsersText: runtimeAllowedUserIds.length === 0 ? "all" : runtimeAllowedUserIds.join(","),
+    });
   };
 
   pi.registerTool({
@@ -591,11 +699,16 @@ export default function (pi: ExtensionAPI) {
 
       if (params.action === "check") {
         if (!pollLeadershipState.isLeader) {
+          const requested = requestLeaderCheck("tool");
           const owner = readTelegramPollLockOwner(TELEGRAM_POLL_LOCK_PATH);
           const ownerText = owner?.pid ? ` (leader pid ${owner.pid})` : "";
-          return { content: [{ type: "text", text: `Skipped poll: follower${ownerText}\n${statusText()}` }] };
+          const text = requested
+            ? `Requested Telegram check from follower${ownerText}\n${statusText()}`
+            : `Failed to request Telegram check${ownerText}\n${statusText()}`;
+          return { content: [{ type: "text", text }] };
         }
-        await pollOnce(ctx, false);
+
+        await executeOperatorCheck(ctx, "tool", { silent: false });
         return { content: [{ type: "text", text: statusText() }] };
       }
 
@@ -644,12 +757,19 @@ export default function (pi: ExtensionAPI) {
 
       if (sub === "check") {
         if (!pollLeadershipState.isLeader) {
+          const requested = requestLeaderCheck("command");
           const owner = readTelegramPollLockOwner(TELEGRAM_POLL_LOCK_PATH);
           const ownerText = owner?.pid ? ` (leader pid ${owner.pid})` : "";
-          ctx.ui.notify(`Skipped poll: follower${ownerText}`, "info");
+          ctx.ui.notify(
+            requested
+              ? `Requested Telegram check from follower${ownerText}`
+              : `Failed to request Telegram check${ownerText}`,
+            requested ? "info" : "warning",
+          );
           return;
         }
-        await pollOnce(ctx, false);
+
+        await executeOperatorCheck(ctx, "command", { silent: false });
         return;
       }
 
