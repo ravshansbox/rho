@@ -46,6 +46,7 @@ export interface GetUpdatesParams {
 export interface SendMessageParams {
   chat_id: number;
   text: string;
+  parse_mode?: "HTML" | "MarkdownV2";
   reply_to_message_id?: number;
   disable_web_page_preview?: boolean;
 }
@@ -112,4 +113,17 @@ export class TelegramClient {
 
     return json.result;
   }
+}
+
+export function isTelegramParseModeError(error: unknown): boolean {
+  if (!(error instanceof TelegramApiError)) return false;
+  if (error.status === 429 || error.status >= 500) return false;
+
+  const message = String(error.message || "").toLowerCase();
+  return (
+    message.includes("can't parse entities")
+    || message.includes("can't find end of")
+    || message.includes("unsupported start tag")
+    || message.includes("entity")
+  );
 }

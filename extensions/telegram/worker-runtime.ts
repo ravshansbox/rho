@@ -1,4 +1,4 @@
-import { TelegramApiError, type GetUpdatesParams, type SendChatActionParams, type SendMessageParams, type TelegramUpdate } from "./api.ts";
+import { TelegramApiError, isTelegramParseModeError, type GetUpdatesParams, type SendChatActionParams, type SendMessageParams, type TelegramUpdate } from "./api.ts";
 import {
   advanceUpdateOffset,
   loadRuntimeState,
@@ -12,11 +12,12 @@ import {
 import { authorizeInbound, normalizeInboundUpdate, type TelegramInboundEnvelope } from "./router.ts";
 import { resolveSessionFile } from "./session-map.ts";
 import { appendTelegramLog } from "./log.ts";
-import { chunkTelegramText } from "./outbound.ts";
+import { renderTelegramOutboundChunks } from "./outbound.ts";
 import { retryDelayMs, shouldRetryTelegramError } from "./retry.ts";
 import { loadOperatorConfig } from "./operator-config.ts";
 import { consumeTelegramCheckTrigger, type TelegramCheckTriggerRequestV1 } from "./check-trigger.ts";
 import { TelegramRpcRunner } from "./rpc.ts";
+import { upsertPendingApproval } from "./pending-approvals.ts";
 
 export interface TelegramClientLike {
   getUpdates(params: GetUpdatesParams): Promise<TelegramUpdate[]>;
@@ -57,6 +58,9 @@ export interface TelegramWorkerSnapshot {
   pendingInbound: number;
   pendingOutbound: number;
   sendFailures: number;
+  lastCheckConsumeAt: number | null;
+  lastCheckOutcome: "ok" | "error" | null;
+  lastCheckRequesterPid: number | null;
 }
 
 export interface TelegramWorkerRuntime {
@@ -85,6 +89,7 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
   const sessionDir = options.sessionDir;
   const checkTriggerPath = options.checkTriggerPath ?? TELEGRAM_CHECK_TRIGGER_PATH;
   const logPath = options.logPath;
+  const strictAllowlist = true;
 
   let runtimeState: TelegramRuntimeState = loadRuntimeState(statePath);
   let pendingInbound: Array<TelegramInboundEnvelope & { sessionKey: string; sessionFile: string }> = [];
@@ -99,6 +104,9 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
   let pollInFlight = false;
   let consecutiveSendFailures = 0;
   let checkTriggerSeenMtimeMs = 0;
+  let lastCheckConsumeAt: number | null = runtimeState.last_check_consume_at;
+  let lastCheckOutcome: "ok" | "error" | null = runtimeState.last_check_outcome;
+  let lastCheckRequesterPid: number | null = runtimeState.last_check_requester_pid;
 
   const logEvent = (event: string, context: TelegramLogContext = {}, extra: Record<string, unknown> = {}) => {
     if (options.logEvent) {
@@ -221,17 +229,49 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
         continue;
       }
 
-      const chunks = chunkTelegramText(item.text);
+      const chunks = renderTelegramOutboundChunks(item.text);
       let failed = false;
 
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
+        let sentTextPreview = chunk.text;
+
         try {
-          await client.sendMessage({
-            chat_id: item.chatId,
-            text: chunk,
-            reply_to_message_id: i === 0 ? item.replyToMessageId : undefined,
-          });
+          try {
+            await client.sendMessage({
+              chat_id: item.chatId,
+              text: chunk.text,
+              parse_mode: chunk.parseMode,
+              disable_web_page_preview: true,
+              reply_to_message_id: i === 0 ? item.replyToMessageId : undefined,
+            });
+          } catch (error) {
+            if (chunk.parseMode && isTelegramParseModeError(error)) {
+              await client.sendMessage({
+                chat_id: item.chatId,
+                text: chunk.fallbackText,
+                disable_web_page_preview: true,
+                reply_to_message_id: i === 0 ? item.replyToMessageId : undefined,
+              });
+              sentTextPreview = chunk.fallbackText;
+              logEvent(
+                "outbound_parse_mode_fallback",
+                {
+                  chatId: item.chatId,
+                  messageId: i === 0 ? item.replyToMessageId : undefined,
+                },
+                {
+                  chunk_index: i,
+                  chunk_count: chunks.length,
+                  attempts: item.attempts,
+                  parse_mode: chunk.parseMode,
+                },
+              );
+            } else {
+              throw error;
+            }
+          }
+
           consecutiveSendFailures = 0;
           logEvent(
             "outbound_sent",
@@ -243,7 +283,7 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
               chunk_index: i,
               chunk_count: chunks.length,
               attempts: item.attempts,
-              text_preview: chunk.slice(0, 120),
+              text_preview: sentTextPreview.slice(0, 120),
             },
           );
         } catch (error) {
@@ -313,7 +353,7 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
         const envelope = normalizeInboundUpdate(update);
         if (!envelope) continue;
 
-        const auth = authorizeInbound(envelope, effectiveAuthSettings(), botUsername || undefined);
+        const auth = authorizeInbound(envelope, effectiveAuthSettings(), botUsername || undefined, strictAllowlist);
         if (!auth.ok) {
           blocked += 1;
           logEvent(
@@ -326,6 +366,41 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
             },
             { reason: auth.reason },
           );
+
+          if (strictAllowlist && (auth.reason === "chat_not_allowed" || auth.reason === "user_not_allowed")) {
+            const pending = upsertPendingApproval({
+              chatId: envelope.chatId,
+              userId: envelope.userId,
+              textPreview: envelope.text.slice(0, 160),
+            });
+
+            logEvent(
+              "inbound_pending_approval",
+              {
+                updateId: envelope.updateId,
+                chatId: envelope.chatId,
+                userId: envelope.userId,
+                messageId: envelope.messageId,
+              },
+              {
+                pin: pending.request.pin,
+                pending_created: pending.created,
+              },
+            );
+
+            if (pending.created) {
+              try {
+                await client.sendMessage({
+                  chat_id: envelope.chatId,
+                  text: `🔒 Access request received. Share this PIN with the operator to approve: ${pending.request.pin}`,
+                  reply_to_message_id: envelope.messageId,
+                });
+              } catch {
+                // ignore notification failures for blocked users
+              }
+            }
+          }
+
           continue;
         }
 
@@ -420,12 +495,27 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
       check_source: consumed.request?.source ?? null,
     });
 
-    const result = await executeOperatorCheck("trigger", {
-      requesterPid: consumed.request?.requesterPid ?? null,
-      silent: true,
-    });
+    lastCheckConsumeAt = Date.now();
+    lastCheckRequesterPid = consumed.request?.requesterPid ?? null;
+    runtimeState.last_check_request_at = consumed.request?.requestedAt ?? null;
+    runtimeState.last_check_consume_at = lastCheckConsumeAt;
+    runtimeState.last_check_requester_pid = lastCheckRequesterPid;
 
-    return { triggered: true, result, request: consumed.request };
+    try {
+      const result = await executeOperatorCheck("trigger", {
+        requesterPid: consumed.request?.requesterPid ?? null,
+        silent: true,
+      });
+      lastCheckOutcome = result.ok ? "ok" : "error";
+      runtimeState.last_check_outcome = lastCheckOutcome;
+      persist();
+      return { triggered: true, result, request: consumed.request };
+    } catch (error) {
+      lastCheckOutcome = "error";
+      runtimeState.last_check_outcome = lastCheckOutcome;
+      persist();
+      throw error;
+    }
   };
 
   const getSnapshot = (): TelegramWorkerSnapshot => ({
@@ -433,6 +523,9 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
     pendingInbound: pendingInbound.length,
     pendingOutbound: pendingOutbound.length,
     sendFailures: consecutiveSendFailures,
+    lastCheckConsumeAt,
+    lastCheckOutcome,
+    lastCheckRequesterPid,
   });
 
   const dispose = () => {

@@ -5,7 +5,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
-import { TelegramClient } from "./api.ts";
+import { TelegramClient, isTelegramParseModeError } from "./api.ts";
 import {
   loadRuntimeState,
   readTelegramSettings,
@@ -14,7 +14,7 @@ import {
 } from "./lib.ts";
 import { appendTelegramLog } from "./log.ts";
 import { loadSessionMap } from "./session-map.ts";
-import { chunkTelegramText } from "./outbound.ts";
+import { renderTelegramOutboundChunks } from "./outbound.ts";
 import { retryDelayMs, shouldRetryTelegramError } from "./retry.ts";
 import { loadOperatorConfig, saveOperatorConfig } from "./operator-config.ts";
 import { getTelegramCheckTriggerState, requestTelegramCheckTrigger } from "./check-trigger.ts";
@@ -168,9 +168,10 @@ export default function (pi: ExtensionAPI) {
       triggerPending: triggerState.pending,
       triggerRequesterPid: triggerState.requesterPid,
       triggerRequestedAt: triggerState.requestedAt,
-      lastCheckRequestAt: lastCheckRequestAtMs,
-      lastCheckConsumeAt: null,
-      lastCheckOutcome: null,
+      lastCheckRequestAt: runtimeState.last_check_request_at ?? lastCheckRequestAtMs,
+      lastCheckConsumeAt: runtimeState.last_check_consume_at,
+      lastCheckOutcome: runtimeState.last_check_outcome,
+      lastCheckRequesterPid: runtimeState.last_check_requester_pid,
       tokenEnv: settings.botTokenEnv,
       lastUpdateId: runtimeState.last_update_id,
       lastPollAt: runtimeState.last_poll_at,
@@ -236,17 +237,49 @@ export default function (pi: ExtensionAPI) {
         continue;
       }
 
-      const chunks = chunkTelegramText(item.text);
+      const chunks = renderTelegramOutboundChunks(item.text);
       let failed = false;
 
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
+        let sentTextPreview = chunk.text;
+
         try {
-          await client.sendMessage({
-            chat_id: item.chatId,
-            text: chunk,
-            reply_to_message_id: i === 0 ? item.replyToMessageId : undefined,
-          });
+          try {
+            await client.sendMessage({
+              chat_id: item.chatId,
+              text: chunk.text,
+              parse_mode: chunk.parseMode,
+              disable_web_page_preview: true,
+              reply_to_message_id: i === 0 ? item.replyToMessageId : undefined,
+            });
+          } catch (error) {
+            if (chunk.parseMode && isTelegramParseModeError(error)) {
+              await client.sendMessage({
+                chat_id: item.chatId,
+                text: chunk.fallbackText,
+                disable_web_page_preview: true,
+                reply_to_message_id: i === 0 ? item.replyToMessageId : undefined,
+              });
+              sentTextPreview = chunk.fallbackText;
+              logEvent(
+                "outbound_parse_mode_fallback",
+                {
+                  chatId: item.chatId,
+                  messageId: i === 0 ? item.replyToMessageId : undefined,
+                },
+                {
+                  chunk_index: i,
+                  chunk_count: chunks.length,
+                  attempts: item.attempts,
+                  parse_mode: chunk.parseMode,
+                },
+              );
+            } else {
+              throw error;
+            }
+          }
+
           consecutiveSendFailures = 0;
           logEvent(
             "outbound_sent",
@@ -258,7 +291,7 @@ export default function (pi: ExtensionAPI) {
               chunk_index: i,
               chunk_count: chunks.length,
               attempts: item.attempts,
-              text_preview: chunk.slice(0, 120),
+              text_preview: sentTextPreview.slice(0, 120),
             },
           );
         } catch (error) {

@@ -3,7 +3,7 @@
  * Run: npx tsx tests/test-telegram.ts
  */
 
-import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -16,11 +16,11 @@ import {
   advanceUpdateOffset,
   type TelegramSettings,
 } from "../extensions/telegram/lib.ts";
-import { TelegramClient, TelegramApiError } from "../extensions/telegram/api.ts";
+import { TelegramClient, TelegramApiError, isTelegramParseModeError } from "../extensions/telegram/api.ts";
 import { authorizeInbound, normalizeInboundUpdate } from "../extensions/telegram/router.ts";
 import { loadSessionMap, resolveSessionFile, sessionKeyForEnvelope } from "../extensions/telegram/session-map.ts";
 import { TelegramRpcRunner } from "../extensions/telegram/rpc.ts";
-import { chunkTelegramText, renderOutboundText } from "../extensions/telegram/outbound.ts";
+import { chunkTelegramText, renderOutboundText, renderTelegramOutboundChunks } from "../extensions/telegram/outbound.ts";
 import { retryDelayMs, shouldRetryTelegramError } from "../extensions/telegram/retry.ts";
 import { appendTelegramLog } from "../extensions/telegram/log.ts";
 import { loadOperatorConfig, saveOperatorConfig } from "../extensions/telegram/operator-config.ts";
@@ -480,6 +480,37 @@ try {
     assert(chunks.length === 3, "long message split into expected chunk count");
     assert(chunks.every((c) => c.length <= 4096), "all chunks respect max length");
     assert(chunks.join("") === longText, "chunks preserve message content when rejoined");
+
+    const markdown = [
+      "# Heading",
+      "",
+      "Use **bold** and `code`.",
+      "",
+      "```",
+      "const x = 1 < 2 && 3 > 2;",
+      "```",
+      "",
+      "Link: [rho](https://rhobot.dev)",
+    ].join("\n");
+
+    const rendered = renderTelegramOutboundChunks(markdown, 4096);
+    assert(rendered.length >= 1, "markdown render produces outbound chunks");
+    assert(rendered[0].parseMode === "HTML", "markdown chunks use HTML parse mode");
+    assert(rendered.some((c) => c.text.includes("<b>Heading</b>")), "heading renders as bold html");
+    assert(rendered.some((c) => c.text.includes("<code>code</code>")), "inline code renders as code html");
+    assert(rendered.some((c) => c.text.includes("<pre><code>")), "fenced code renders as pre/code html");
+    assert(rendered.some((c) => c.text.includes('<a href="https://rhobot.dev">rho</a>')), "markdown links render as html links");
+    assert(rendered.every((c) => c.text.length <= 4096), "rendered markdown chunks fit Telegram limit");
+  }
+
+  console.log("\n-- parse-mode error detection --");
+  {
+    const parseError = new TelegramApiError("Bad Request: can't parse entities", 400);
+    const serverError = new TelegramApiError("Internal Server Error", 500);
+
+    assert(isTelegramParseModeError(parseError) === true, "detects parse-mode entity errors");
+    assert(isTelegramParseModeError(serverError) === false, "does not treat 5xx as parse-mode errors");
+    assert(isTelegramParseModeError(new Error("nope")) === false, "non-telegram errors are ignored");
   }
 
   console.log("\n-- retry policy helpers --");
@@ -659,6 +690,7 @@ try {
       lastCheckRequestAt: 1_700_000_000_100,
       lastCheckConsumeAt: 1_700_000_000_200,
       lastCheckOutcome: "ok",
+      lastCheckRequesterPid: 2222,
       tokenEnv: "TELEGRAM_BOT_TOKEN",
       lastUpdateId: 12,
       lastPollAt: "2026-02-13T00:00:00.000Z",
@@ -673,6 +705,7 @@ try {
     assert(status.includes("Leadership: follower (leader pid 4321 @host)"), "status includes leadership role + owner context");
     assert(status.includes("Check trigger pending: yes"), "status includes trigger pending context");
     assert(status.includes("Last check outcome: ok"), "status includes check execution outcome");
+    assert(status.includes("Last check requester pid: 2222"), "status includes requester pid for last consumed check");
 
     const ui = renderTelegramUiStatus({
       mode: "polling",
@@ -689,6 +722,49 @@ try {
     assert(ui.includes("F4321"), "ui status includes follower owner pid context");
     assert(ui.includes("tr!"), "ui status includes trigger pending marker");
     assert(ui.includes("pf1"), "ui status includes poll health context");
+  }
+
+  console.log("\n-- cli status surfaces consumed check telemetry --");
+  {
+    const cliHome = join(tmp, "cli-home");
+    const initPath = join(cliHome, ".rho", "init.toml");
+    const statePath = join(cliHome, ".rho", "telegram", "state.json");
+
+    mkdirSync(join(cliHome, ".rho", "telegram"), { recursive: true });
+
+    writeFileSync(
+      initPath,
+      [
+        "[settings.telegram]",
+        "enabled = true",
+        "mode = \"polling\"",
+      ].join("\n"),
+    );
+
+    writeFileSync(
+      statePath,
+      JSON.stringify({
+        last_update_id: 9,
+        last_poll_at: "2026-02-13T00:00:00.000Z",
+        consecutive_failures: 0,
+        mode: "polling",
+        last_check_request_at: 1_700_000_000_100,
+        last_check_consume_at: 1_700_000_000_200,
+        last_check_outcome: "ok",
+        last_check_requester_pid: 7777,
+      }),
+    );
+
+    const cli = spawnSync("node", ["cli/rho.mjs", "telegram", "status"], {
+      cwd: process.cwd(),
+      env: { ...process.env, HOME: cliHome },
+      encoding: "utf-8",
+    });
+
+    assert(cli.status === 0, "cli status exits zero");
+    assert(cli.stdout.includes("Last check consume at:"), "cli status includes check consume timestamp line");
+    assert(cli.stdout.includes("Last check outcome: ok"), "cli status includes persisted check outcome");
+    assert(cli.stdout.includes("Last check requester pid: 7777"), "cli status includes persisted check requester pid");
   }
 
   console.log("\n-- operator check event logging --");
