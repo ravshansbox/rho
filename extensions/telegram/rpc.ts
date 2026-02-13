@@ -45,8 +45,11 @@ function formatStderrSuffix(lines: string[]): string {
 
 export class TelegramRpcRunner {
   private readonly sessions = new Map<string, RpcSessionState>();
+  private readonly spawnProcess: typeof spawn;
 
-  constructor(private readonly spawnProcess: typeof spawn = spawn) {}
+  constructor(spawnProcess: typeof spawn = spawn) {
+    this.spawnProcess = spawnProcess;
+  }
 
   async runPrompt(sessionFile: string, message: string, timeoutMs = 120_000): Promise<string> {
     const session = this.ensureSession(sessionFile);

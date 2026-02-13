@@ -4,6 +4,7 @@
  */
 
 import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { PassThrough } from "node:stream";
@@ -455,6 +456,15 @@ try {
     assert(capturedEnv?.RHO_TELEGRAM_DISABLE === "1", "RPC child disables telegram polling without disabling other extensions");
     assert(capturedEnv?.RHO_SUBAGENT !== "1", "RPC child does not force global subagent mode");
     runner.dispose();
+  }
+
+  console.log("\n-- rpc module loads with strip-types --");
+  {
+    const rpcPath = join(process.cwd(), "extensions", "telegram", "rpc.ts");
+    const result = spawnSync(process.execPath, ["--experimental-strip-types", "--no-warnings", rpcPath], {
+      encoding: "utf-8",
+    });
+    assert(result.status === 0, "rpc module loads under experimental strip-types");
   }
 
   console.log("\n-- outbound rendering + chunking --");
