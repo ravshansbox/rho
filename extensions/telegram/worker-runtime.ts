@@ -22,6 +22,7 @@ import { loadOperatorConfig } from "./operator-config.ts";
 import { consumeTelegramCheckTrigger, type TelegramCheckTriggerRequestV1 } from "./check-trigger.ts";
 import { TelegramRpcRunner } from "./rpc.ts";
 import { upsertPendingApproval } from "./pending-approvals.ts";
+import { formatSlashPromptFailure, parseSlashInput } from "./slash-contract.ts";
 
 export interface TelegramClientLike {
   getUpdates(params: GetUpdatesParams): Promise<TelegramUpdate[]>;
@@ -247,6 +248,17 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
     }
   };
 
+  const formatPromptFailureText = (inputText: string, rawMessage: string): string => {
+    const message = String(rawMessage || "RPC prompt failed").trim() || "RPC prompt failed";
+    const slashMapped = formatSlashPromptFailure(inputText, message);
+
+    if (parseSlashInput(inputText).isSlash) {
+      return `⚠️ ${slashMapped}`;
+    }
+
+    return `⚠️ Failed to run prompt: ${message}`;
+  };
+
   const drainInboundQueue = async () => {
     if (drainingInbound) return;
     drainingInbound = true;
@@ -279,7 +291,7 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
           pendingOutbound.push({
             chatId: item.chatId,
             replyToMessageId: item.messageId,
-            text: `⚠️ Failed to run prompt: ${msg}`,
+            text: formatPromptFailureText(item.text, msg),
             attempts: 0,
             notBeforeMs: 0,
           });

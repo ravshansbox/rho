@@ -332,6 +332,221 @@ try {
     runner.dispose();
   }
 
+  console.log("\n-- RPC slash prompt response semantics --");
+  {
+    const slashSuccessSpawn = ((_cmd: string, _args: string[]) => {
+      const child = new EventEmitter() as any;
+      const stdout = new PassThrough();
+      const stderr = new PassThrough();
+      const stdin: any = {
+        destroyed: false,
+        writable: true,
+        write: (line: string) => {
+          const payload = JSON.parse(String(line).trim());
+          if (payload.type === "prompt") {
+            setTimeout(() => {
+              stdout.write(JSON.stringify({
+                type: "response",
+                id: payload.id,
+                command: "prompt",
+                success: true,
+              }) + "\n");
+            }, 5);
+          }
+          return true;
+        },
+      };
+      child.stdin = stdin;
+      child.stdout = stdout;
+      child.stderr = stderr;
+      child.kill = () => {
+        child.emit("exit", 0, null);
+        return true;
+      };
+      return child;
+    }) as any;
+
+    const slashSuccessRunner = new TelegramRpcRunner(slashSuccessSpawn);
+    const slashAck = await slashSuccessRunner.runPrompt("/tmp/fake-slash-session.jsonl", "/telegram status", 250);
+    assert(slashAck.includes("/telegram"), "slash prompt resolves from prompt response without waiting for agent_end");
+    slashSuccessRunner.dispose();
+
+    const slashUnsupportedSpawn = ((_cmd: string, _args: string[]) => {
+      const child = new EventEmitter() as any;
+      const stdout = new PassThrough();
+      const stderr = new PassThrough();
+      const stdin: any = {
+        destroyed: false,
+        writable: true,
+        write: (line: string) => {
+          const payload = JSON.parse(String(line).trim());
+          if (payload.type === "prompt") {
+            setTimeout(() => {
+              stdout.write(JSON.stringify({
+                type: "response",
+                id: payload.id,
+                command: "prompt",
+                success: false,
+                error: "Unknown command: /settings",
+              }) + "\n");
+            }, 5);
+          }
+          return true;
+        },
+      };
+      child.stdin = stdin;
+      child.stdout = stdout;
+      child.stderr = stderr;
+      child.kill = () => {
+        child.emit("exit", 0, null);
+        return true;
+      };
+      return child;
+    }) as any;
+
+    const slashUnsupportedRunner = new TelegramRpcRunner(slashUnsupportedSpawn);
+    let slashUnsupportedMapped = false;
+    try {
+      await slashUnsupportedRunner.runPrompt("/tmp/fake-slash-unsupported-session.jsonl", "/settings", 250);
+    } catch (error) {
+      slashUnsupportedMapped = String((error as Error)?.message || "").includes("Unsupported slash command /settings");
+    }
+    assert(slashUnsupportedMapped, "maps unsupported slash command RPC errors to actionable text");
+    slashUnsupportedRunner.dispose();
+
+    let spawnCount = 0;
+    const mixedPromptSpawn = ((_cmd: string, _args: string[]) => {
+      spawnCount += 1;
+      const child = new EventEmitter() as any;
+      const stdout = new PassThrough();
+      const stderr = new PassThrough();
+      const stdin: any = {
+        destroyed: false,
+        writable: true,
+        write: (line: string) => {
+          const payload = JSON.parse(String(line).trim());
+          if (payload.type !== "prompt") return true;
+
+          if (typeof payload.message === "string" && payload.message.startsWith("/")) {
+            setTimeout(() => {
+              stdout.write(JSON.stringify({
+                type: "response",
+                id: payload.id,
+                command: "prompt",
+                success: true,
+              }) + "\n");
+            }, 5);
+            return true;
+          }
+
+          setTimeout(() => {
+            stdout.write(JSON.stringify({
+              type: "response",
+              id: payload.id,
+              command: "prompt",
+              success: true,
+            }) + "\n");
+            stdout.write(JSON.stringify({
+              type: "message_end",
+              message: { role: "assistant", content: [{ type: "text", text: "normal prompt ok" }] },
+            }) + "\n");
+            stdout.write(JSON.stringify({ type: "agent_end" }) + "\n");
+          }, 5);
+          return true;
+        },
+      };
+      child.stdin = stdin;
+      child.stdout = stdout;
+      child.stderr = stderr;
+      child.kill = () => {
+        child.emit("exit", 0, null);
+        return true;
+      };
+      return child;
+    }) as any;
+
+    const mixedRunner = new TelegramRpcRunner(mixedPromptSpawn);
+    const first = await mixedRunner.runPrompt("/tmp/fake-mixed-session.jsonl", "/telegram check", 300);
+    const second = await mixedRunner.runPrompt("/tmp/fake-mixed-session.jsonl", "regular prompt", 2000);
+    assert(first.includes("/telegram"), "mixed prompt flow: slash result returns deterministic acknowledgement text");
+    assert(second === "normal prompt ok", "mixed prompt flow: non-slash prompt still resolves via assistant output");
+    assert(spawnCount === 1, "mixed prompt flow reuses the same RPC session for slash + non-slash prompts");
+    mixedRunner.dispose();
+  }
+
+  console.log("\n-- RPC slash inventory classification --");
+  {
+    let promptCount = 0;
+    const inventorySpawn = ((_cmd: string, _args: string[]) => {
+      const child = new EventEmitter() as any;
+      const stdout = new PassThrough();
+      const stderr = new PassThrough();
+      const stdin: any = {
+        destroyed: false,
+        writable: true,
+        write: (line: string) => {
+          const payload = JSON.parse(String(line).trim());
+
+          if (payload.type === "get_commands") {
+            setTimeout(() => {
+              stdout.write(JSON.stringify({
+                type: "response",
+                id: payload.id,
+                command: "get_commands",
+                success: true,
+                data: {
+                  commands: [
+                    { name: "telegram", source: "extension" },
+                    { name: "skill:triage", source: "skill" },
+                  ],
+                },
+              }) + "\n");
+            }, 5);
+            return true;
+          }
+
+          if (payload.type === "prompt") {
+            promptCount += 1;
+            setTimeout(() => {
+              stdout.write(JSON.stringify({
+                type: "response",
+                id: payload.id,
+                command: "prompt",
+                success: true,
+              }) + "\n");
+            }, 5);
+          }
+
+          return true;
+        },
+      };
+      child.stdin = stdin;
+      child.stdout = stdout;
+      child.stderr = stderr;
+      child.kill = () => {
+        child.emit("exit", 0, null);
+        return true;
+      };
+      return child;
+    }) as any;
+
+    const runner = new TelegramRpcRunner(inventorySpawn);
+
+    const supported = await runner.runPrompt("/tmp/fake-inventory-session.jsonl", "/telegram status", 300);
+    assert(supported.includes("/telegram"), "supported slash command runs via prompt with deterministic ack");
+
+    let interactiveRejected = false;
+    try {
+      await runner.runPrompt("/tmp/fake-inventory-session.jsonl", "/settings", 300);
+    } catch (error) {
+      interactiveRejected = String((error as Error)?.message || "").includes("interactive TUI");
+    }
+    assert(interactiveRejected, "interactive-only slash command is rejected before prompt execution");
+    assert(promptCount === 1, "interactive-only slash rejection does not send prompt RPC command");
+
+    runner.dispose();
+  }
+
   console.log("\n-- RPC stderr handling (warnings vs fatal) --");
   {
     const warningSpawn = ((_cmd: string, _args: string[]) => {

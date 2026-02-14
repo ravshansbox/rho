@@ -10,6 +10,7 @@ Rho includes a polling-first Telegram adapter (`extensions/telegram`) that maps 
 - Runs prompts through rho RPC (`pi --mode rpc`)
 - Sends responses back with chunking + retry/backoff
 - Exposes operator controls via tool + `/telegram` command
+- Follows shared slash RPC contract (`docs/slash-command-contract.md`) for classification, execution, and errors
 
 ## Enable
 

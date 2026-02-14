@@ -1,5 +1,16 @@
 const CHAT_REFRESH_INTERVAL = 15000;
 
+const slashContract = globalThis.__rhoSlashContract ?? {
+  INTERACTIVE_ONLY_SLASH_COMMANDS: new Set(["settings", "hotkeys"]),
+  parseSlashInput: () => ({ kind: "not_slash", isSlash: false, commandName: "" }),
+  normalizeCommandsPayload: () => [],
+  buildCommandIndex: () => new Map(),
+  classifySlashCommand: () => ({ kind: "not_slash", isSlash: false, commandName: "" }),
+  resolvePromptOptions: () => ({}),
+  formatUnsupportedMessage: () => "Slash command is not available in this RPC session.",
+  formatPromptFailure: (_inputMessage, rawError) => String(rawError || "RPC prompt failed"),
+};
+
 function safeString(value) {
   if (value == null) {
     return "";
@@ -627,6 +638,11 @@ document.addEventListener("alpine:init", () => {
     activeRpcSessionId: "",
     activeRpcSessionFile: "",
     promptText: "",
+    slashCommands: [],
+    slashCommandIndex: new Map(),
+    slashCommandsLoading: false,
+    slashCommandsLoaded: false,
+    pendingSlashClassification: null,
     streamMessageId: "",
     markdownRenderQueue: new Map(),
     markdownFrame: null,
@@ -890,6 +906,7 @@ document.addEventListener("alpine:init", () => {
         this.requestState();
         this.requestAvailableModels();
         this.requestSessionStats();
+        this.requestSlashCommands(true);
         return;
       }
 
@@ -912,13 +929,19 @@ document.addEventListener("alpine:init", () => {
     handleRpcEvent(event) {
       if (event.type === "response") {
         if (!event.success) {
-          this.error = event.error ?? `RPC command failed: ${event.command ?? "unknown"}`;
+          if (event.command === "prompt" && this.pendingSlashClassification?.isSlash) {
+            const rawError = event.error ?? `RPC command failed: ${event.command ?? "unknown"}`;
+            this.error = slashContract.formatPromptFailure(this.pendingSlashClassification.raw ?? this.promptText, rawError);
+          } else {
+            this.error = event.error ?? `RPC command failed: ${event.command ?? "unknown"}`;
+          }
         }
         // Clear sending flag once RPC acknowledges the prompt.
         // For normal prompts, isStreaming (agent_start/agent_end) gates the UI.
         // For slash commands that bypass the LLM, this prevents a permanent lock.
         if (event.command === "prompt") {
           this.isSendingPrompt = false;
+          this.pendingSlashClassification = null;
         }
         // Handle get_state response
         if (event.command === "get_state" && event.success) {
@@ -934,6 +957,16 @@ document.addEventListener("alpine:init", () => {
         if (event.command === "get_session_stats" && event.success) {
           const stats = event.stats ?? event.data ?? {};
           this.handleSessionStatsUpdate(stats);
+        }
+        // Handle get_commands response
+        if (event.command === "get_commands") {
+          this.slashCommandsLoading = false;
+          if (event.success) {
+            const commands = slashContract.normalizeCommandsPayload(event.data ?? event.commands ?? []);
+            this.slashCommands = commands;
+            this.slashCommandIndex = slashContract.buildCommandIndex(commands);
+            this.slashCommandsLoaded = true;
+          }
         }
         return;
       }
@@ -1588,6 +1621,14 @@ document.addEventListener("alpine:init", () => {
       this.showSessionsPanel = !this.showSessionsPanel;
     },
 
+    resetSlashCommandsCache() {
+      this.slashCommands = [];
+      this.slashCommandIndex = new Map();
+      this.slashCommandsLoaded = false;
+      this.slashCommandsLoading = false;
+      this.pendingSlashClassification = null;
+    },
+
     clearSelectedSession() {
       this.activeSessionId = "";
       this.activeSession = null;
@@ -1600,6 +1641,7 @@ document.addEventListener("alpine:init", () => {
       // Clear stale RPC + exit fullscreen
       this.activeRpcSessionId = "";
       this.activeRpcSessionFile = "";
+      this.resetSlashCommandsCache();
       this.exitMaximized();
 
       // Clear URL hash
@@ -1627,6 +1669,7 @@ document.addEventListener("alpine:init", () => {
       // Clear stale RPC when switching sessions
       this.activeRpcSessionId = "";
       this.activeRpcSessionFile = "";
+      this.resetSlashCommandsCache();
 
       // Persist in URL for refresh/back (optional)
       if (updateHash && window.location.hash !== `#${sessionId}`) {
@@ -1803,6 +1846,7 @@ document.addEventListener("alpine:init", () => {
         this.activeSessionId = result.sessionId;
         this.activeRpcSessionId = "";
         this.activeRpcSessionFile = result.sessionFile;
+        this.resetSlashCommandsCache();
         history.replaceState(null, "", `#${result.sessionId}`);
         this.promptText = "";
         this.renderedMessages = [];
@@ -1839,6 +1883,7 @@ document.addEventListener("alpine:init", () => {
         this.activeSessionId = forkResult.sessionId;
         this.activeRpcSessionId = "";
         this.activeRpcSessionFile = forkResult.sessionFile;
+        this.resetSlashCommandsCache();
         history.replaceState(null, "", `#${forkResult.sessionId}`);
         this.promptText = "";
 
@@ -1875,8 +1920,7 @@ document.addEventListener("alpine:init", () => {
       }
     },
 
-    async sendPrompt() {
-      const message = this.promptText.trim();
+    sendPromptMessage(message, promptOptions = {}, slashClassification = null) {
       if (!message || !this.activeRpcSessionId || this.isSendingPrompt) {
         return;
       }
@@ -1885,14 +1929,15 @@ document.addEventListener("alpine:init", () => {
       this.isSendingPrompt = true;
       this.promptText = "";
       this.streamMessageId = "";
+      this.pendingSlashClassification = slashClassification;
 
       // Add user message locally before sending to RPC
       this.renderedMessages.push({
         id: `local-user-${Date.now()}`,
-        role: 'user',
-        roleLabel: 'USER',
+        role: "user",
+        roleLabel: "USER",
         timestamp: new Date().toLocaleString(),
-        parts: [{ type: 'text', render: 'text', content: message, key: `text-0` }],
+        parts: [{ type: "text", render: "text", content: message, key: "text-0" }],
         canFork: true,
       });
       this.scrollThreadToBottom();
@@ -1903,6 +1948,7 @@ document.addEventListener("alpine:init", () => {
         command: {
           type: "prompt",
           message,
+          ...promptOptions,
         },
       });
 
@@ -1917,6 +1963,25 @@ document.addEventListener("alpine:init", () => {
       this.focusComposer();
     },
 
+    sendPrompt() {
+      const message = this.promptText.trim();
+      if (!message) {
+        return;
+      }
+      this.sendPromptMessage(message);
+    },
+
+    classifySlashPrompt(message) {
+      return slashContract.classifySlashCommand(message, this.slashCommandIndex, {
+        interactiveOnlyCommands: slashContract.INTERACTIVE_ONLY_SLASH_COMMANDS,
+      });
+    },
+
+    sendSlashPrompt(message, classification) {
+      const promptOptions = slashContract.resolvePromptOptions(classification, this.isStreaming, "steer");
+      this.sendPromptMessage(message, promptOptions, classification);
+    },
+
     messageForkPreview(message) {
       const firstText = message?.parts?.find((part) => part.type === "text");
       const text = firstText ? extractText(firstText.content ?? "") : "";
@@ -1924,6 +1989,29 @@ document.addEventListener("alpine:init", () => {
     },
 
     // Chat controls methods
+
+    requestSlashCommands(force = false) {
+      if (!this.activeRpcSessionId) {
+        return;
+      }
+      if (this.slashCommandsLoading) {
+        return;
+      }
+      if (!force && this.slashCommandsLoaded && this.slashCommandIndex.size > 0) {
+        return;
+      }
+
+      this.slashCommandsLoading = true;
+      const sent = this.sendWs({
+        type: "rpc_command",
+        sessionId: this.activeRpcSessionId,
+        command: { type: "get_commands" },
+      });
+
+      if (!sent) {
+        this.slashCommandsLoading = false;
+      }
+    },
 
     requestState() {
       if (!this.activeRpcSessionId) {
@@ -2082,6 +2170,7 @@ document.addEventListener("alpine:init", () => {
 
       this.error = "";
       this.promptText = "";
+      this.pendingSlashClassification = null;
 
       this.sendWs({
         type: "rpc_command",
@@ -2103,6 +2192,7 @@ document.addEventListener("alpine:init", () => {
 
       this.error = "";
       this.promptText = "";
+      this.pendingSlashClassification = null;
 
       this.sendWs({
         type: "rpc_command",
@@ -2117,6 +2207,28 @@ document.addEventListener("alpine:init", () => {
     },
 
     handlePromptSubmit() {
+      const message = this.promptText.trim();
+      if (!message) {
+        return;
+      }
+
+      const slashClassification = this.classifySlashPrompt(message);
+      if (slashClassification.isSlash) {
+        if (!this.slashCommandsLoaded) {
+          this.requestSlashCommands(true);
+          this.error = "Loading slash commands from RPC. Try again in a moment.";
+          return;
+        }
+
+        if (slashClassification.kind !== "supported") {
+          this.error = slashContract.formatUnsupportedMessage(slashClassification);
+          return;
+        }
+
+        this.sendSlashPrompt(message, slashClassification);
+        return;
+      }
+
       if (this.isStreaming) {
         // During streaming, submit as steer
         this.sendSteer();
@@ -2182,7 +2294,9 @@ document.addEventListener("alpine:init", () => {
     },
 
     submitButtonLabel() {
-      if (this.isStreaming) {
+      const message = this.promptText.trim();
+      const slashClassification = message ? this.classifySlashPrompt(message) : null;
+      if (this.isStreaming && !slashClassification?.isSlash) {
         return "Steer";
       }
       return "Send";

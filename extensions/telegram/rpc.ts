@@ -1,11 +1,39 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 
+import {
+  buildCommandIndex,
+  classifySlashCommand,
+  formatSlashAcknowledgement,
+  formatSlashPromptFailure,
+  formatUnsupportedMessage,
+  INTERACTIVE_ONLY_SLASH_COMMANDS,
+  parseSlashInput,
+  type SlashClassification,
+  type SlashCommandEntry,
+} from "./slash-contract.ts";
+
+const SLASH_RESPONSE_FALLBACK_MS = 250;
+const SLASH_COMMAND_DISCOVERY_TIMEOUT_MS = 1_000;
+
 interface PendingPrompt {
   resolve: (value: string) => void;
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
+  fallbackTimer: NodeJS.Timeout | null;
+  requestId: string;
+  inputMessage: string;
+  isSlashCommand: boolean;
+  sawPromptResponse: boolean;
+  sawAgentStart: boolean;
+  sawAgentEnd: boolean;
   lastAssistantText: string;
   stderrLines: string[];
+}
+
+interface PendingCommandsRequest {
+  requestId: string;
+  timer: NodeJS.Timeout;
+  resolve: (value: Map<string, SlashCommandEntry> | null) => void;
 }
 
 interface RpcSessionState {
@@ -14,6 +42,9 @@ interface RpcSessionState {
   buffer: string;
   connected: boolean;
   pending: PendingPrompt | null;
+  commandIndex: Map<string, SlashCommandEntry>;
+  commandsLoaded: boolean;
+  pendingCommandsRequest: PendingCommandsRequest | null;
 }
 
 function extractAssistantText(message: any): string {
@@ -46,6 +77,8 @@ function formatStderrSuffix(lines: string[]): string {
 export class TelegramRpcRunner {
   private readonly sessions = new Map<string, RpcSessionState>();
   private readonly spawnProcess: typeof spawn;
+  private promptRequestCounter = 0;
+  private commandsRequestCounter = 0;
 
   constructor(spawnProcess: typeof spawn = spawn) {
     this.spawnProcess = spawnProcess;
@@ -57,15 +90,42 @@ export class TelegramRpcRunner {
       throw new Error(`RPC session busy for ${sessionFile}`);
     }
 
+    const slashClassification = await this.classifySlashPrompt(session, message, timeoutMs);
+    if (slashClassification && slashClassification.kind !== "supported") {
+      throw new Error(formatUnsupportedMessage(slashClassification));
+    }
+
+    const requestId = `prompt-${++this.promptRequestCounter}`;
+
     return await new Promise<string>((resolve, reject) => {
       const timer = setTimeout(() => {
-        const stderrLines = session.pending?.stderrLines ?? [];
-        session.pending = null;
-        reject(new Error(`RPC prompt timed out after ${Math.floor(timeoutMs / 1000)}s${formatStderrSuffix(stderrLines)}`));
+        const pending = session.pending;
+        if (!pending || pending.requestId !== requestId) return;
+
+        if (pending.isSlashCommand && pending.sawPromptResponse) {
+          this.resolvePending(session, this.resolvePromptText(pending));
+          return;
+        }
+
+        this.rejectPending(session, `RPC prompt timed out after ${Math.floor(timeoutMs / 1000)}s`);
       }, timeoutMs);
 
-      session.pending = { resolve, reject, timer, lastAssistantText: "", stderrLines: [] };
-      this.sendCommand(session, { type: "prompt", message });
+      session.pending = {
+        resolve,
+        reject,
+        timer,
+        fallbackTimer: null,
+        requestId,
+        inputMessage: message,
+        isSlashCommand: parseSlashInput(message).isSlash,
+        sawPromptResponse: false,
+        sawAgentStart: false,
+        sawAgentEnd: false,
+        lastAssistantText: "",
+        stderrLines: [],
+      };
+
+      this.sendCommand(session, { id: requestId, type: "prompt", message });
     });
   }
 
@@ -73,9 +133,9 @@ export class TelegramRpcRunner {
     for (const session of this.sessions.values()) {
       try { session.process.kill("SIGTERM"); } catch {}
       if (session.pending) {
-        clearTimeout(session.pending.timer);
-        session.pending.reject(new Error("RPC session disposed"));
+        this.rejectPending(session, "RPC session disposed");
       }
+      this.resolveCommandsRequest(session, null);
     }
     this.sessions.clear();
   }
@@ -99,6 +159,9 @@ export class TelegramRpcRunner {
       buffer: "",
       connected: false,
       pending: null,
+      commandIndex: new Map(),
+      commandsLoaded: false,
+      pendingCommandsRequest: null,
     };
 
     child.stdout.setEncoding("utf-8");
@@ -126,12 +189,10 @@ export class TelegramRpcRunner {
     });
 
     child.once("exit", (code, signal) => {
-      const pending = state.pending;
-      state.pending = null;
-      if (pending) {
-        clearTimeout(pending.timer);
-        pending.reject(new Error(`RPC exited (code=${code ?? "null"}, signal=${signal ?? "null"})${formatStderrSuffix(pending.stderrLines)}`));
+      if (state.pending) {
+        this.rejectPending(state, `RPC exited (code=${code ?? "null"}, signal=${signal ?? "null"})`);
       }
+      this.resolveCommandsRequest(state, null);
       this.sessions.delete(sessionFile);
     });
 
@@ -155,6 +216,141 @@ export class TelegramRpcRunner {
     session.process.stdin.write(JSON.stringify(command) + "\n", "utf-8");
   }
 
+  private clearPendingTimers(pending: PendingPrompt): void {
+    clearTimeout(pending.timer);
+    if (pending.fallbackTimer) {
+      clearTimeout(pending.fallbackTimer);
+      pending.fallbackTimer = null;
+    }
+  }
+
+  private resolvePromptText(pending: PendingPrompt): string {
+    if (pending.lastAssistantText) return pending.lastAssistantText;
+    if (pending.isSlashCommand && pending.sawPromptResponse) {
+      return formatSlashAcknowledgement(pending.inputMessage);
+    }
+    return "";
+  }
+
+  private resolvePending(session: RpcSessionState, text: string): void {
+    const pending = session.pending;
+    if (!pending) return;
+
+    session.pending = null;
+    this.clearPendingTimers(pending);
+    pending.resolve(text);
+  }
+
+  private rejectPending(session: RpcSessionState, message: string): void {
+    const pending = session.pending;
+    if (!pending) return;
+
+    session.pending = null;
+    this.clearPendingTimers(pending);
+    pending.reject(new Error(`${message}${formatStderrSuffix(pending.stderrLines)}`));
+  }
+
+  private scheduleSlashFallback(session: RpcSessionState, pending: PendingPrompt): void {
+    if (pending.fallbackTimer) {
+      clearTimeout(pending.fallbackTimer);
+      pending.fallbackTimer = null;
+    }
+
+    pending.fallbackTimer = setTimeout(() => {
+      if (session.pending !== pending) return;
+      if (pending.sawAgentStart || pending.sawAgentEnd || pending.lastAssistantText) return;
+      this.resolvePending(session, this.resolvePromptText(pending));
+    }, SLASH_RESPONSE_FALLBACK_MS);
+  }
+
+  private resolveCommandsRequest(session: RpcSessionState, commands: Map<string, SlashCommandEntry> | null): void {
+    const pendingRequest = session.pendingCommandsRequest;
+    if (!pendingRequest) {
+      return;
+    }
+
+    session.pendingCommandsRequest = null;
+    clearTimeout(pendingRequest.timer);
+
+    if (commands) {
+      session.commandIndex = commands;
+      session.commandsLoaded = true;
+    }
+
+    pendingRequest.resolve(commands);
+  }
+
+  private async loadCommandIndex(session: RpcSessionState, timeoutMs: number): Promise<Map<string, SlashCommandEntry> | null> {
+    if (session.commandsLoaded) {
+      return session.commandIndex;
+    }
+
+    if (session.pendingCommandsRequest) {
+      return await new Promise((resolve) => {
+        const existing = session.pendingCommandsRequest;
+        if (!existing) {
+          resolve(null);
+          return;
+        }
+
+        const poll = setInterval(() => {
+          if (session.pendingCommandsRequest === existing) {
+            return;
+          }
+          clearInterval(poll);
+          resolve(session.commandsLoaded ? session.commandIndex : null);
+        }, 10);
+
+        setTimeout(() => {
+          clearInterval(poll);
+          resolve(session.commandsLoaded ? session.commandIndex : null);
+        }, timeoutMs + 25);
+      });
+    }
+
+    const requestId = `commands-${++this.commandsRequestCounter}`;
+    const safeTimeoutMs = Math.max(100, Math.min(timeoutMs, SLASH_COMMAND_DISCOVERY_TIMEOUT_MS));
+
+    return await new Promise<Map<string, SlashCommandEntry> | null>((resolve) => {
+      const timer = setTimeout(() => {
+        if (session.pendingCommandsRequest?.requestId !== requestId) return;
+        this.resolveCommandsRequest(session, null);
+      }, safeTimeoutMs);
+
+      session.pendingCommandsRequest = {
+        requestId,
+        timer,
+        resolve,
+      };
+
+      try {
+        this.sendCommand(session, { id: requestId, type: "get_commands" });
+      } catch {
+        this.resolveCommandsRequest(session, null);
+      }
+    });
+  }
+
+  private async classifySlashPrompt(
+    session: RpcSessionState,
+    message: string,
+    timeoutMs: number,
+  ): Promise<SlashClassification | null> {
+    const parsed = parseSlashInput(message);
+    if (!parsed.isSlash) {
+      return null;
+    }
+
+    const commandIndex = await this.loadCommandIndex(session, timeoutMs);
+    if (!commandIndex) {
+      return null;
+    }
+
+    return classifySlashCommand(message, commandIndex, {
+      interactiveOnlyCommands: INTERACTIVE_ONLY_SLASH_COMMANDS,
+    });
+  }
+
   private handleLine(session: RpcSessionState, line: string): void {
     let event: any;
     try {
@@ -164,27 +360,90 @@ export class TelegramRpcRunner {
     }
 
     if (!session.connected) session.connected = true;
+
+    if (event.type === "response" && event.command === "get_commands") {
+      const pendingRequest = session.pendingCommandsRequest;
+      if (!pendingRequest) {
+        return;
+      }
+
+      const responseId = typeof event.id === "string" ? event.id : null;
+      if (responseId && responseId !== pendingRequest.requestId) {
+        return;
+      }
+
+      if (event.success === false) {
+        this.resolveCommandsRequest(session, null);
+        return;
+      }
+
+      const commands = buildCommandIndex(event.data ?? event.commands ?? []);
+      this.resolveCommandsRequest(session, commands);
+      return;
+    }
+
     if (!session.pending) return;
 
+    if (event.type === "response" && event.command === "prompt") {
+      const pending = session.pending;
+      if (!pending) return;
+
+      const responseId = typeof event.id === "string" ? event.id : null;
+      if (responseId && responseId !== pending.requestId) return;
+
+      if (event.success === false) {
+        const mapped = formatSlashPromptFailure(pending.inputMessage, String(event.error || "RPC prompt failed"));
+        this.rejectPending(session, mapped);
+        return;
+      }
+
+      pending.sawPromptResponse = true;
+      if (pending.isSlashCommand && !pending.sawAgentStart && !pending.sawAgentEnd && !pending.lastAssistantText) {
+        this.scheduleSlashFallback(session, pending);
+      }
+      return;
+    }
+
+    if (event.type === "agent_start") {
+      const pending = session.pending;
+      if (!pending) return;
+      pending.sawAgentStart = true;
+      if (pending.fallbackTimer) {
+        clearTimeout(pending.fallbackTimer);
+        pending.fallbackTimer = null;
+      }
+      return;
+    }
+
     if (event.type === "message_end") {
+      const pending = session.pending;
+      if (!pending) return;
+
       const maybeText = extractAssistantText(event.message);
-      if (maybeText) session.pending.lastAssistantText = maybeText;
+      if (maybeText) {
+        pending.lastAssistantText = maybeText;
+        if (pending.isSlashCommand && pending.sawPromptResponse && !pending.sawAgentStart) {
+          this.resolvePending(session, pending.lastAssistantText);
+        }
+      }
       return;
     }
 
     if (event.type === "agent_end") {
       const pending = session.pending;
-      session.pending = null;
-      clearTimeout(pending.timer);
-      pending.resolve(pending.lastAssistantText || "");
+      if (!pending) return;
+
+      pending.sawAgentEnd = true;
+      this.resolvePending(session, this.resolvePromptText(pending));
       return;
     }
 
     if (event.type === "rpc_error" || event.type === "rpc_process_crashed") {
       const pending = session.pending;
-      session.pending = null;
-      clearTimeout(pending.timer);
-      pending.reject(new Error(`${event.message || "RPC error"}${formatStderrSuffix(pending.stderrLines)}`));
+      if (!pending) return;
+
+      const mapped = formatSlashPromptFailure(pending.inputMessage, String(event.message || "RPC error"));
+      this.rejectPending(session, mapped);
     }
   }
 }
