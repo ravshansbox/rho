@@ -88,14 +88,6 @@ Slash command:
 /telegram revoke-user <user_id>
 ```
 
-Common Telegram shortcuts accepted by the bridge:
-
-```text
-/status     -> /telegram status
-/check      -> /telegram check
-/telegram   -> /telegram status
-```
-
 Tool action interface (`telegram` tool):
 
 - `status`

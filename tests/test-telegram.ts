@@ -344,6 +344,19 @@ try {
         writable: true,
         write: (line: string) => {
           const payload = JSON.parse(String(line).trim());
+          if (payload.type === "get_commands") {
+            setTimeout(() => {
+              stdout.write(JSON.stringify({
+                type: "response",
+                id: payload.id,
+                command: "get_commands",
+                success: true,
+                data: { commands: [{ name: "telegram", source: "extension" }] },
+              }) + "\n");
+            }, 5);
+            return true;
+          }
+
           if (payload.type === "prompt") {
             setTimeout(() => {
               stdout.write(JSON.stringify({
@@ -352,6 +365,7 @@ try {
                 command: "prompt",
                 success: true,
               }) + "\n");
+              stdout.write(JSON.stringify({ type: "agent_end" }) + "\n");
             }, 5);
           }
           return true;
@@ -369,8 +383,38 @@ try {
 
     const slashSuccessRunner = new TelegramRpcRunner(slashSuccessSpawn);
     const slashAck = await slashSuccessRunner.runPrompt("/tmp/fake-slash-session.jsonl", "/telegram status", 250);
-    assert(slashAck.includes("/telegram"), "slash prompt resolves from prompt response without waiting for agent_end");
+    assert(slashAck.includes("/telegram"), "slash prompt resolves after agent_end with deterministic acknowledgement");
     slashSuccessRunner.dispose();
+
+    const slashInventoryUnavailableSpawn = ((_cmd: string, _args: string[]) => {
+      const child = new EventEmitter() as any;
+      const stdout = new PassThrough();
+      const stderr = new PassThrough();
+      const stdin: any = {
+        destroyed: false,
+        writable: true,
+        write: (_line: string) => true,
+      };
+      child.stdin = stdin;
+      child.stdout = stdout;
+      child.stderr = stderr;
+      child.kill = () => {
+        child.emit("exit", 0, null);
+        return true;
+      };
+      return child;
+    }) as any;
+
+    const slashInventoryUnavailableRunner = new TelegramRpcRunner(slashInventoryUnavailableSpawn);
+    let slashInventoryUnavailableRejected = false;
+    try {
+      await slashInventoryUnavailableRunner.runPrompt("/tmp/fake-slash-inventory-unavailable-session.jsonl", "/telegram status", 250);
+    } catch (error) {
+      slashInventoryUnavailableRejected = String((error as Error)?.message || "")
+        .includes("Slash command inventory unavailable");
+    }
+    assert(slashInventoryUnavailableRejected, "slash prompt fails closed when command inventory cannot be loaded");
+    slashInventoryUnavailableRunner.dispose();
 
     const slashAgentStartOnlySpawn = ((_cmd: string, _args: string[]) => {
       const child = new EventEmitter() as any;
@@ -420,10 +464,15 @@ try {
 
     const slashAgentStartOnlyRunner = new TelegramRpcRunner(slashAgentStartOnlySpawn);
     const slashAgentStartOnlyBegin = Date.now();
-    const slashAgentStartOnlyAck = await slashAgentStartOnlyRunner.runPrompt("/tmp/fake-slash-start-only-session.jsonl", "/telegram check", 900);
+    let slashAgentStartOnlyTimedOut = false;
+    try {
+      await slashAgentStartOnlyRunner.runPrompt("/tmp/fake-slash-start-only-session.jsonl", "/telegram check", 900);
+    } catch (error) {
+      slashAgentStartOnlyTimedOut = String((error as Error)?.message || "").includes("timed out");
+    }
     const slashAgentStartOnlyElapsed = Date.now() - slashAgentStartOnlyBegin;
-    assert(slashAgentStartOnlyAck.includes("/telegram"), "slash prompt resolves when only agent_start is emitted after prompt response");
-    assert(slashAgentStartOnlyElapsed < 600, "slash prompt does not wait for full timeout when only agent_start is emitted");
+    assert(slashAgentStartOnlyTimedOut, "slash prompt times out when prompt response never reaches message_end/agent_end");
+    assert(slashAgentStartOnlyElapsed >= 800, "slash prompt waits near full timeout when completion events are missing");
     slashAgentStartOnlyRunner.dispose();
 
     const slashMessageWithoutAgentEndSpawn = ((_cmd: string, _args: string[]) => {
@@ -496,6 +545,18 @@ try {
         writable: true,
         write: (line: string) => {
           const payload = JSON.parse(String(line).trim());
+          if (payload.type === "get_commands") {
+            setTimeout(() => {
+              stdout.write(JSON.stringify({
+                type: "response",
+                id: payload.id,
+                command: "get_commands",
+                success: true,
+                data: { commands: [{ name: "telegram", source: "extension" }] },
+              }) + "\n");
+            }, 5);
+            return true;
+          }
           if (payload.type === "prompt") {
             setTimeout(() => {
               stdout.write(JSON.stringify({
@@ -503,7 +564,7 @@ try {
                 id: payload.id,
                 command: "prompt",
                 success: false,
-                error: "Unknown command: /settings",
+                error: "Unknown command: /telegram",
               }) + "\n");
             }, 5);
           }
@@ -523,11 +584,11 @@ try {
     const slashUnsupportedRunner = new TelegramRpcRunner(slashUnsupportedSpawn);
     let slashUnsupportedMapped = false;
     try {
-      await slashUnsupportedRunner.runPrompt("/tmp/fake-slash-unsupported-session.jsonl", "/settings", 250);
+      await slashUnsupportedRunner.runPrompt("/tmp/fake-slash-unsupported-session.jsonl", "/telegram nope", 250);
     } catch (error) {
-      slashUnsupportedMapped = String((error as Error)?.message || "").includes("Unsupported slash command /settings");
+      slashUnsupportedMapped = String((error as Error)?.message || "").includes("Unsupported slash command /telegram");
     }
-    assert(slashUnsupportedMapped, "maps unsupported slash command RPC errors to actionable text");
+    assert(slashUnsupportedMapped, "maps unknown slash command RPC errors to actionable text");
     slashUnsupportedRunner.dispose();
 
     let spawnCount = 0;
@@ -541,6 +602,20 @@ try {
         writable: true,
         write: (line: string) => {
           const payload = JSON.parse(String(line).trim());
+
+          if (payload.type === "get_commands") {
+            setTimeout(() => {
+              stdout.write(JSON.stringify({
+                type: "response",
+                id: payload.id,
+                command: "get_commands",
+                success: true,
+                data: { commands: [{ name: "telegram", source: "extension" }] },
+              }) + "\n");
+            }, 5);
+            return true;
+          }
+
           if (payload.type !== "prompt") return true;
 
           if (typeof payload.message === "string" && payload.message.startsWith("/")) {
@@ -551,6 +626,7 @@ try {
                 command: "prompt",
                 success: true,
               }) + "\n");
+              stdout.write(JSON.stringify({ type: "agent_end" }) + "\n");
             }, 5);
             return true;
           }
@@ -630,6 +706,7 @@ try {
                 command: "prompt",
                 success: true,
               }) + "\n");
+              stdout.write(JSON.stringify({ type: "agent_end" }) + "\n");
             }, 5);
           }
 
@@ -880,7 +957,8 @@ try {
 
     const lines = readFileSync(logPath, "utf-8").trim().split("\n").map((l) => JSON.parse(l) as any);
     assert(lines.length === 2, "two log lines written");
-    assert(lines[0].event === "legacy_type_event", "legacy type key normalized to event");
+    assert(lines[0].event === "unknown", "missing event key defaults to unknown");
+    assert(lines[0].type === undefined, "legacy type key is not promoted into schema fields");
     assert(lines[1].event === "modern_event", "modern event key preserved");
     assert(lines[0].source === "telegram", "log source is telegram");
     assert(lines[0].schema_version === 1, "log schema version present");

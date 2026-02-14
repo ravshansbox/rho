@@ -12,20 +12,16 @@ import {
   type SlashCommandEntry,
 } from "./slash-contract.ts";
 
-const SLASH_RESPONSE_FALLBACK_MS = 250;
-const SLASH_AGENT_START_GRACE_MS = 400;
 const SLASH_COMMAND_DISCOVERY_TIMEOUT_MS = 1_000;
 
 interface PendingPrompt {
   resolve: (value: string) => void;
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
-  fallbackTimer: NodeJS.Timeout | null;
   requestId: string;
   inputMessage: string;
   isSlashCommand: boolean;
   sawPromptResponse: boolean;
-  sawAgentStart: boolean;
   sawAgentEnd: boolean;
   lastAssistantText: string;
   stderrLines: string[];
@@ -103,11 +99,6 @@ export class TelegramRpcRunner {
         const pending = session.pending;
         if (!pending || pending.requestId !== requestId) return;
 
-        if (pending.isSlashCommand && pending.sawPromptResponse) {
-          this.resolvePending(session, this.resolvePromptText(pending));
-          return;
-        }
-
         this.rejectPending(session, `RPC prompt timed out after ${Math.floor(timeoutMs / 1000)}s`);
       }, timeoutMs);
 
@@ -115,12 +106,10 @@ export class TelegramRpcRunner {
         resolve,
         reject,
         timer,
-        fallbackTimer: null,
         requestId,
         inputMessage: message,
         isSlashCommand: parseSlashInput(message).isSlash,
         sawPromptResponse: false,
-        sawAgentStart: false,
         sawAgentEnd: false,
         lastAssistantText: "",
         stderrLines: [],
@@ -219,10 +208,6 @@ export class TelegramRpcRunner {
 
   private clearPendingTimers(pending: PendingPrompt): void {
     clearTimeout(pending.timer);
-    if (pending.fallbackTimer) {
-      clearTimeout(pending.fallbackTimer);
-      pending.fallbackTimer = null;
-    }
   }
 
   private resolvePromptText(pending: PendingPrompt): string {
@@ -249,20 +234,6 @@ export class TelegramRpcRunner {
     session.pending = null;
     this.clearPendingTimers(pending);
     pending.reject(new Error(`${message}${formatStderrSuffix(pending.stderrLines)}`));
-  }
-
-  private scheduleSlashFallback(session: RpcSessionState, pending: PendingPrompt, delayMs = SLASH_RESPONSE_FALLBACK_MS): void {
-    if (pending.fallbackTimer) {
-      clearTimeout(pending.fallbackTimer);
-      pending.fallbackTimer = null;
-    }
-
-    pending.fallbackTimer = setTimeout(() => {
-      if (session.pending !== pending) return;
-      if (!pending.sawPromptResponse) return;
-      if (pending.sawAgentEnd || pending.lastAssistantText) return;
-      this.resolvePending(session, this.resolvePromptText(pending));
-    }, delayMs);
   }
 
   private resolveCommandsRequest(session: RpcSessionState, commands: Map<string, SlashCommandEntry> | null): void {
@@ -345,7 +316,7 @@ export class TelegramRpcRunner {
 
     const commandIndex = await this.loadCommandIndex(session, timeoutMs);
     if (!commandIndex) {
-      return null;
+      throw new Error("Slash command inventory unavailable. Retry in a moment.");
     }
 
     return classifySlashCommand(message, commandIndex, {
@@ -400,24 +371,6 @@ export class TelegramRpcRunner {
       }
 
       pending.sawPromptResponse = true;
-      if (pending.isSlashCommand && !pending.sawAgentEnd && !pending.lastAssistantText) {
-        this.scheduleSlashFallback(session, pending);
-      }
-      return;
-    }
-
-    if (event.type === "agent_start") {
-      const pending = session.pending;
-      if (!pending) return;
-      pending.sawAgentStart = true;
-
-      if (pending.isSlashCommand && pending.sawPromptResponse && !pending.sawAgentEnd && !pending.lastAssistantText) {
-        this.scheduleSlashFallback(session, pending, SLASH_AGENT_START_GRACE_MS);
-      } else if (pending.fallbackTimer) {
-        clearTimeout(pending.fallbackTimer);
-        pending.fallbackTimer = null;
-      }
-
       return;
     }
 

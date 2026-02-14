@@ -6,12 +6,10 @@ const HOME = process.env.HOME || homedir();
 const LOG_PATH = join(HOME, ".rho", "telegram", "log.jsonl");
 
 function normalizeLogEvent(input: Record<string, unknown>): Record<string, unknown> {
-  const { type, event, ...rest } = input;
-  const normalizedEvent = typeof event === "string"
+  const { type: _legacyType, event, ...rest } = input;
+  const normalizedEvent = typeof event === "string" && event.trim().length > 0
     ? event
-    : typeof type === "string"
-      ? type
-      : "unknown";
+    : "unknown";
 
   return {
     source: "telegram",

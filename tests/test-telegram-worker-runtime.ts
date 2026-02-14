@@ -180,7 +180,7 @@ try {
   assert(typeof resetMap["dm:1111"] === "string" && resetMap["dm:1111"].length > 0, "/new writes refreshed session mapping");
   resetRuntime.dispose();
 
-  console.log("\n-- slash shortcuts normalize to /telegram commands --");
+  console.log("\n-- slash commands pass through without shortcut normalization --");
   const shortcutsStatePath = join(tmp, "telegram", "state.shortcuts.json");
   const shortcutsMapPath = join(tmp, "telegram", "session-map.shortcuts.json");
   const shortcutsSessionDir = join(tmp, "sessions-shortcuts");
@@ -273,14 +273,14 @@ try {
   assert(shortcutResult.accepted === 4, "shortcut scenario accepts all shortcut updates");
   assert(
     JSON.stringify(shortcutPrompts) === JSON.stringify([
-      "/telegram status",
-      "/telegram check",
-      "/telegram status",
+      "/status",
+      "/check",
+      "/telegram",
       "/telegram check",
     ]),
-    "shortcut scenario maps /status, /check, and bare /telegram to canonical telegram commands",
+    "shortcut scenario forwards slash prompts exactly as received",
   );
-  assert(shortcutSent.length === 4, "shortcut scenario sends one response per normalized shortcut prompt");
+  assert(shortcutSent.length === 4, "shortcut scenario sends one response per slash prompt");
   shortcutRuntime.dispose();
 
   console.log("\n-- check trigger consumes + runs poll --");

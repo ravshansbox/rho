@@ -271,39 +271,6 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
     return target === botUsername.toLowerCase();
   };
 
-  const normalizeShortcutPrompt = (text: string): { promptText: string; aliasApplied: boolean } => {
-    const trimmed = String(text || "").trim();
-    if (!trimmed.startsWith("/")) return { promptText: text, aliasApplied: false };
-
-    const token = trimmed.split(/\s+/, 1)[0] || "";
-    const tokenMatch = token.match(/^\/([a-z0-9_]+)(?:@([a-z0-9_]+))?$/i);
-    if (!tokenMatch) return { promptText: text, aliasApplied: false };
-
-    const command = tokenMatch[1].toLowerCase();
-    const target = (tokenMatch[2] || "").toLowerCase();
-
-    if (target) {
-      if (!botUsername) return { promptText: text, aliasApplied: false };
-      if (target !== botUsername.toLowerCase()) return { promptText: text, aliasApplied: false };
-    }
-
-    const rest = trimmed.slice(token.length).trim();
-
-    if (command === "status") {
-      return { promptText: `/telegram status${rest ? ` ${rest}` : ""}`, aliasApplied: true };
-    }
-
-    if (command === "check") {
-      return { promptText: `/telegram check${rest ? ` ${rest}` : ""}`, aliasApplied: true };
-    }
-
-    if (command === "telegram" && rest.length === 0) {
-      return { promptText: "/telegram status", aliasApplied: true };
-    }
-
-    return { promptText: text, aliasApplied: false };
-  };
-
   const newSessionAcknowledgement = "🆕 Started a new session for this chat.";
 
   const drainInboundQueue = async () => {
@@ -312,30 +279,12 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
     try {
       while (pendingInbound.length > 0) {
         const item = pendingInbound[0]!;
-        const normalizedPrompt = normalizeShortcutPrompt(item.text);
-
-        if (normalizedPrompt.aliasApplied) {
-          logEvent(
-            "inbound_shortcut_normalized",
-            {
-              updateId: item.updateId,
-              chatId: item.chatId,
-              userId: item.userId,
-              messageId: item.messageId,
-              sessionKey: item.sessionKey,
-              sessionFile: item.sessionFile,
-            },
-            {
-              original_text: item.text.slice(0, 120),
-              normalized_text: normalizedPrompt.promptText.slice(0, 120),
-            },
-          );
-        }
+        const promptText = item.text;
 
         try {
           const response = await withTypingIndicator(
             item.chatId,
-            () => rpcRunner.runPrompt(item.sessionFile, normalizedPrompt.promptText),
+            () => rpcRunner.runPrompt(item.sessionFile, promptText),
           );
           pendingOutbound.push({
             chatId: item.chatId,
@@ -361,7 +310,7 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
           pendingOutbound.push({
             chatId: item.chatId,
             replyToMessageId: item.messageId,
-            text: formatPromptFailureText(normalizedPrompt.promptText, msg),
+            text: formatPromptFailureText(promptText, msg),
             attempts: 0,
             notBeforeMs: 0,
           });
