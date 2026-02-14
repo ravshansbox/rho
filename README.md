@@ -139,7 +139,8 @@ export TELEGRAM_BOT_TOKEN="<bot-token>"
 # enabled = true
 
 rho sync
-rho start
+rho telegram onboard
+rho telegram start
 ```
 
 Operator controls:
@@ -149,6 +150,22 @@ Operator controls:
 /telegram check
 /telegram allow-chat <chat_id>
 /telegram allow-user <user_id>
+```
+
+Common Telegram shortcuts:
+
+```
+/status    -> /telegram status
+/check     -> /telegram check
+/telegram  -> /telegram status
+```
+
+Approval flow for blocked senders:
+
+```bash
+rho telegram pending
+rho telegram approve --pin 123456
+rho telegram reject --pin 123456
 ```
 
 Security model (MVP):

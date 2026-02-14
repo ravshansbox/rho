@@ -35,6 +35,7 @@ import {
   requestTelegramCheckTrigger,
 } from "../extensions/telegram/check-trigger.ts";
 import { renderTelegramStatusText, renderTelegramUiStatus } from "../extensions/telegram/status.ts";
+import { formatSlashAcknowledgement } from "../extensions/telegram/slash-contract.ts";
 
 let PASS = 0;
 let FAIL = 0;
@@ -856,6 +857,18 @@ try {
     const e400 = new TelegramApiError("bad", 400);
     assert(shouldRetryTelegramError(e400, 0) === false, "do not retry 4xx non-rate-limit");
     assert(shouldRetryTelegramError(e500, 3) === false, "respect max attempt cap");
+  }
+
+  console.log("\n-- slash acknowledgement formatting --");
+  {
+    assert(
+      formatSlashAcknowledgement("/telegram status") === "✅ /telegram status executed.",
+      "slash acknowledgement includes command + first argument context",
+    );
+    assert(
+      formatSlashAcknowledgement("/telegram") === "✅ /telegram executed.",
+      "slash acknowledgement falls back to command-only when no args are provided",
+    );
   }
 
   console.log("\n-- log event normalization --");

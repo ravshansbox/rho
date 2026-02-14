@@ -58,6 +58,8 @@ console.log("\n-- unsupported and interactive-only guardrails --");
   const index = contract.buildCommandIndex([]);
   const interactiveOnly = contract.classifySlashCommand("/settings", index);
   const unsupported = contract.classifySlashCommand("/nope", index);
+  const statusShortcut = contract.classifySlashCommand("/status", index);
+  const checkShortcut = contract.classifySlashCommand("/check", index);
 
   assertEq(interactiveOnly.kind, "interactive_only", "flags TUI-only slash command");
   assert(
@@ -70,6 +72,18 @@ console.log("\n-- unsupported and interactive-only guardrails --");
     contract.formatUnsupportedMessage(unsupported).includes("get_commands"),
     "unsupported message points to RPC command inventory",
   );
+
+  assertEq(statusShortcut.kind, "unsupported", "flags /status shortcut as unsupported when not in inventory");
+  assert(
+    contract.formatUnsupportedMessage(statusShortcut).includes("Try /telegram status"),
+    "/status unsupported message suggests canonical telegram status command",
+  );
+
+  assertEq(checkShortcut.kind, "unsupported", "flags /check shortcut as unsupported when not in inventory");
+  assert(
+    contract.formatUnsupportedMessage(checkShortcut).includes("Try /telegram check"),
+    "/check unsupported message suggests canonical telegram check command",
+  );
 }
 
 console.log("\n-- slash prompt failure mapping --");
@@ -78,10 +92,15 @@ console.log("\n-- slash prompt failure mapping --");
   const timeout = contract.formatPromptFailure(slash, "RPC prompt timed out after 20s");
   const busy = contract.formatPromptFailure(slash, "session is busy");
   const unsupported = contract.formatPromptFailure(slash, "Unknown command: /telegram");
+  const statusShortcutUnsupported = contract.formatPromptFailure("/status", "Unknown command: /status");
 
   assert(timeout.includes("timed out"), "timeout failures map to retry guidance");
   assert(busy.includes("session is busy"), "busy failures map to busy guidance");
   assert(unsupported.includes("get_commands"), "unsupported failures point to get_commands inventory");
+  assert(
+    statusShortcutUnsupported.includes("Try /telegram status"),
+    "prompt failure for /status suggests canonical telegram status command",
+  );
 }
 
 console.log("\n-- streaming prompt option semantics --");

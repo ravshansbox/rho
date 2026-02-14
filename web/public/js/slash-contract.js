@@ -156,6 +156,12 @@ function resolvePromptOptions(classification, isStreaming, defaultStreamingBehav
   };
 }
 
+function shortcutSuggestion(commandName) {
+  if (commandName === "status") return "Try /telegram status.";
+  if (commandName === "check") return "Try /telegram check.";
+  return null;
+}
+
 function formatUnsupportedMessage(classification) {
   const command = classification?.commandName ? `/${classification.commandName}` : "slash command";
   if (classification?.kind === "interactive_only") {
@@ -164,6 +170,14 @@ function formatUnsupportedMessage(classification) {
   if (classification?.kind === "invalid") {
     return "Invalid slash command. Enter a command name after /.";
   }
+
+  if (classification?.commandName) {
+    const suggestion = shortcutSuggestion(classification.commandName);
+    if (suggestion) {
+      return `Unsupported slash command ${command}. ${suggestion}`;
+    }
+  }
+
   return `Unsupported slash command ${command}. Choose a command returned by get_commands.`;
 }
 
@@ -178,6 +192,10 @@ function formatPromptFailure(inputMessage, rawError) {
   const command = parsed.commandName ? `/${parsed.commandName}` : "slash command";
 
   if (/unknown command|not found|unrecognized|unsupported/i.test(message)) {
+    const suggestion = parsed.commandName ? shortcutSuggestion(parsed.commandName) : null;
+    if (suggestion) {
+      return `Unsupported slash command ${command}. ${suggestion}`;
+    }
     return `Unsupported slash command ${command}. Choose a command returned by get_commands.`;
   }
 

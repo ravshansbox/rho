@@ -65,7 +65,7 @@ console.log("\n-- parity: unsupported/interative error text --");
   const webIndex = webContract.buildCommandIndex(inventory);
   const telegramIndex = buildTelegramCommandIndex(inventory);
 
-  const cases = ["/settings", "/nope"];
+  const cases = ["/settings", "/nope", "/status", "/check"];
   for (const input of cases) {
     const web = webContract.classifySlashCommand(input, webIndex);
     const telegram = classifyTelegramSlash(input, telegramIndex);
@@ -74,6 +74,14 @@ console.log("\n-- parity: unsupported/interative error text --");
     const telegramMessage = formatTelegramUnsupported(telegram);
     assertEq(telegramMessage, webMessage, `unsupported message matches for ${input}`);
   }
+
+  const statusShortcutMessage = formatTelegramUnsupported(
+    classifyTelegramSlash("/status", telegramIndex),
+  );
+  assert(
+    statusShortcutMessage.includes("Try /telegram status"),
+    "shortcut unsupported text suggests canonical telegram status command",
+  );
 }
 
 console.log("\n-- parity: prompt failure categories --");
@@ -91,6 +99,10 @@ console.log("\n-- parity: prompt failure categories --");
     const telegramMessage = formatSlashPromptFailure(slash, raw);
     assertEq(telegramMessage, webMessage, `prompt failure mapping matches for error: ${raw}`);
   }
+
+  const webStatusShortcut = webContract.formatPromptFailure("/status", "Unknown command: /status");
+  const telegramStatusShortcut = formatSlashPromptFailure("/status", "Unknown command: /status");
+  assertEq(telegramStatusShortcut, webStatusShortcut, "shortcut prompt failure message parity for /status");
 
   const nonSlash = "hello";
   assertEq(

@@ -36,11 +36,43 @@ Set your token:
 export TELEGRAM_BOT_TOKEN="<your-bot-token>"
 ```
 
-Apply + run:
+Apply config:
 
 ```bash
 rho sync
-rho start
+```
+
+## Worker lifecycle (important)
+
+Telegram polling is owned by the dedicated worker process.
+
+```bash
+rho telegram start
+rho telegram status
+rho telegram logs -f
+rho telegram stop
+```
+
+Use `rho start` for heartbeat/session daemon lifecycle; use `rho telegram ...` for Telegram transport lifecycle.
+
+## Onboarding + approval flow
+
+### Guided onboarding
+
+```bash
+rho telegram onboard
+```
+
+This validates the token, detects chat/user, and can lock allowlists.
+
+### Pending access approvals
+
+When strict allowlists block a sender, they receive a PIN. Operator flow:
+
+```bash
+rho telegram pending
+rho telegram approve --pin 123456
+rho telegram reject --pin 123456
 ```
 
 ## Operator controls
@@ -54,6 +86,14 @@ Slash command:
 /telegram revoke-chat <chat_id>
 /telegram allow-user <user_id>
 /telegram revoke-user <user_id>
+```
+
+Common Telegram shortcuts accepted by the bridge:
+
+```text
+/status     -> /telegram status
+/check      -> /telegram check
+/telegram   -> /telegram status
 ```
 
 Tool action interface (`telegram` tool):
@@ -77,6 +117,9 @@ Tool action interface (`telegram` tool):
 - `~/.rho/telegram/session-map.json` (chat/session mapping)
 - `~/.rho/telegram/log.jsonl` (audit events)
 - `~/.rho/telegram/config.json` (runtime allow/revoke overrides)
+- `~/.rho/telegram/inbound.queue.json` (durable inbound queue)
+- `~/.rho/telegram/outbound.queue.json` (durable outbound queue)
+- `~/.rho/telegram/pending-approvals.json` (approval requests)
 
 ## Smoke test
 

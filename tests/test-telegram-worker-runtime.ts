@@ -66,8 +66,10 @@ try {
     },
   };
 
+  const rpcPrompts: string[] = [];
   const rpcRunner = {
-    async runPrompt() {
+    async runPrompt(_sessionFile: string, message: string) {
+      rpcPrompts.push(message);
       return "pong";
     },
     dispose() {
@@ -103,6 +105,7 @@ try {
   assert(result.ok === true, "pollOnce reports ok");
   assert(result.accepted === 1, "pollOnce accepts authorized update");
   assert(sent.length === 1, "pollOnce sends outbound reply");
+  assert(rpcPrompts[0] === "hello worker", "pollOnce forwards non-slash prompt text unchanged");
 
   const snapshot = runtime.getSnapshot();
   assert(snapshot.runtimeState.last_update_id === 502, "runtime state advances update offset");
@@ -176,6 +179,109 @@ try {
   const resetMap = loadSessionMap(resetMapPath);
   assert(typeof resetMap["dm:1111"] === "string" && resetMap["dm:1111"].length > 0, "/new writes refreshed session mapping");
   resetRuntime.dispose();
+
+  console.log("\n-- slash shortcuts normalize to /telegram commands --");
+  const shortcutsStatePath = join(tmp, "telegram", "state.shortcuts.json");
+  const shortcutsMapPath = join(tmp, "telegram", "session-map.shortcuts.json");
+  const shortcutsSessionDir = join(tmp, "sessions-shortcuts");
+
+  const shortcutUpdates = [
+    {
+      update_id: 701,
+      message: {
+        message_id: 91,
+        from: { id: 2222 },
+        chat: { id: 1111, type: "private" as const },
+        date: 1,
+        text: "/status",
+      },
+    },
+    {
+      update_id: 702,
+      message: {
+        message_id: 92,
+        from: { id: 2222 },
+        chat: { id: 1111, type: "private" as const },
+        date: 1,
+        text: "/check",
+      },
+    },
+    {
+      update_id: 703,
+      message: {
+        message_id: 93,
+        from: { id: 2222 },
+        chat: { id: 1111, type: "private" as const },
+        date: 1,
+        text: "/telegram",
+      },
+    },
+    {
+      update_id: 704,
+      message: {
+        message_id: 94,
+        from: { id: 2222 },
+        chat: { id: 1111, type: "private" as const },
+        date: 1,
+        text: "/telegram check",
+      },
+    },
+  ];
+
+  let shortcutGetUpdatesCalls = 0;
+  const shortcutSent: Array<{ chat_id: number; text: string }> = [];
+  const shortcutClient = {
+    async getUpdates() {
+      shortcutGetUpdatesCalls++;
+      return shortcutGetUpdatesCalls === 1 ? shortcutUpdates : [];
+    },
+    async sendMessage(params: { chat_id: number; text: string }) {
+      shortcutSent.push({ chat_id: params.chat_id, text: params.text });
+      return { message_id: 1, chat: { id: params.chat_id, type: "private" as const }, date: 1 };
+    },
+    async sendChatAction() {
+      return true;
+    },
+  };
+
+  const shortcutPrompts: string[] = [];
+  const shortcutRpcRunner = {
+    async runPrompt(_sessionFile: string, message: string) {
+      shortcutPrompts.push(message);
+      return `ok:${message}`;
+    },
+    dispose() {
+      // no-op
+    },
+  };
+
+  const shortcutRuntime = createTelegramWorkerRuntime({
+    settings,
+    client: shortcutClient as any,
+    rpcRunner: shortcutRpcRunner as any,
+    statePath: shortcutsStatePath,
+    mapPath: shortcutsMapPath,
+    sessionDir: shortcutsSessionDir,
+    checkTriggerPath: join(tmp, "telegram", "check.trigger.shortcuts.json"),
+    operatorConfigPath: join(tmp, "telegram", "config.shortcuts.json"),
+    botUsername: "tau_rhobot",
+    logPath: join(tmp, "telegram", "log.shortcuts.jsonl"),
+  });
+
+  const shortcutResult = await shortcutRuntime.pollOnce(false);
+  assert(shortcutResult.ok === true, "shortcut scenario poll succeeds");
+  assert(shortcutResult.accepted === 4, "shortcut scenario accepts all shortcut updates");
+  assert(
+    JSON.stringify(shortcutPrompts) === JSON.stringify([
+      "/telegram status",
+      "/telegram check",
+      "/telegram status",
+      "/telegram check",
+    ]),
+    "shortcut scenario maps /status, /check, and bare /telegram to canonical telegram commands",
+  );
+  assert(shortcutSent.length === 4, "shortcut scenario sends one response per normalized shortcut prompt");
+  shortcutRuntime.dispose();
 
   console.log("\n-- check trigger consumes + runs poll --");
   requestTelegramCheckTrigger(triggerPath, {

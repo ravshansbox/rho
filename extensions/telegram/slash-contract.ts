@@ -170,6 +170,12 @@ export function classifySlashCommand(
   };
 }
 
+function shortcutSuggestion(commandName: string): string | null {
+  if (commandName === "status") return "Try /telegram status.";
+  if (commandName === "check") return "Try /telegram check.";
+  return null;
+}
+
 export function formatUnsupportedMessage(classification: SlashClassification): string {
   const command = classification?.commandName ? `/${classification.commandName}` : "slash command";
   if (classification?.kind === "interactive_only") {
@@ -178,13 +184,23 @@ export function formatUnsupportedMessage(classification: SlashClassification): s
   if (classification?.kind === "invalid") {
     return "Invalid slash command. Enter a command name after /.";
   }
+
+  if (classification?.commandName) {
+    const suggestion = shortcutSuggestion(classification.commandName);
+    if (suggestion) {
+      return `Unsupported slash command ${command}. ${suggestion}`;
+    }
+  }
+
   return `Unsupported slash command ${command}. Choose a command returned by get_commands.`;
 }
 
 export function formatSlashAcknowledgement(inputMessage: string): string {
   const parsed = parseSlashInput(inputMessage);
   const command = parsed.commandName ? `/${parsed.commandName}` : "slash command";
-  return `✅ ${command} executed.`;
+  const tokens = parsed.trimmed.split(/\s+/).filter(Boolean);
+  const firstArg = tokens.length > 1 ? ` ${tokens[1]}` : "";
+  return `✅ ${command}${firstArg} executed.`;
 }
 
 export function formatSlashPromptFailure(inputMessage: string, rawError: string): string {
@@ -198,6 +214,10 @@ export function formatSlashPromptFailure(inputMessage: string, rawError: string)
   const command = parsed.commandName ? `/${parsed.commandName}` : "slash command";
 
   if (/unknown command|not found|unrecognized|unsupported/i.test(message)) {
+    const suggestion = parsed.commandName ? shortcutSuggestion(parsed.commandName) : null;
+    if (suggestion) {
+      return `Unsupported slash command ${command}. ${suggestion}`;
+    }
     return `Unsupported slash command ${command}. Choose a command returned by get_commands.`;
   }
 
