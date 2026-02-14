@@ -66,3 +66,23 @@ export function resolveSessionFile(
   saveSessionMap(map, mapPath);
   return { sessionKey: key, sessionFile, created: true };
 }
+
+export function resetSessionFile(
+  envelope: TelegramInboundEnvelope,
+  mapPath: string = defaultMapPath(),
+  sessionDirOverride?: string,
+): { sessionKey: string; sessionFile: string; previousSessionFile?: string } {
+  const map = loadSessionMap(mapPath);
+  const key = sessionKeyForEnvelope(envelope);
+  const previousSessionFile = map[key];
+
+  const sessionFile = createSessionFile(sessionDirOverride);
+  map[key] = sessionFile;
+  saveSessionMap(map, mapPath);
+
+  return {
+    sessionKey: key,
+    sessionFile,
+    previousSessionFile: typeof previousSessionFile === "string" ? previousSessionFile : undefined,
+  };
+}

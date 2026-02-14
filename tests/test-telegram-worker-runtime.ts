@@ -11,6 +11,7 @@ import { TelegramApiError } from "../extensions/telegram/api.ts";
 import { createTelegramWorkerRuntime } from "../extensions/telegram/worker-runtime.ts";
 import { requestTelegramCheckTrigger } from "../extensions/telegram/check-trigger.ts";
 import { loadRuntimeState, type TelegramSettings } from "../extensions/telegram/lib.ts";
+import { loadSessionMap } from "../extensions/telegram/session-map.ts";
 
 let PASS = 0;
 let FAIL = 0;
@@ -107,6 +108,74 @@ try {
   assert(snapshot.runtimeState.last_update_id === 502, "runtime state advances update offset");
   assert(snapshot.pendingInbound === 0, "inbound queue drained");
   assert(snapshot.pendingOutbound === 0, "outbound queue drained");
+
+  console.log("\n-- /new resets chat session without calling RPC --");
+  const resetStatePath = join(tmp, "telegram", "state.reset.json");
+  const resetMapPath = join(tmp, "telegram", "session-map.reset.json");
+  const resetSessionDir = join(tmp, "sessions-reset");
+  const resetLogPath = join(tmp, "telegram", "log.reset.jsonl");
+
+  const resetUpdates = [
+    {
+      update_id: 601,
+      message: {
+        message_id: 88,
+        from: { id: 2222 },
+        chat: { id: 1111, type: "private" as const },
+        date: 1,
+        text: "/new",
+      },
+    },
+  ];
+
+  const resetSent: Array<{ chat_id: number; text: string }> = [];
+  let resetRpcCalls = 0;
+  const resetClient = {
+    async getUpdates() {
+      return resetUpdates;
+    },
+    async sendMessage(params: { chat_id: number; text: string }) {
+      resetSent.push({ chat_id: params.chat_id, text: params.text });
+      return { message_id: 1, chat: { id: params.chat_id, type: "private" as const }, date: 1 };
+    },
+    async sendChatAction() {
+      return true;
+    },
+  };
+
+  const resetRpcRunner = {
+    async runPrompt() {
+      resetRpcCalls++;
+      return "should not run";
+    },
+    dispose() {
+      // no-op
+    },
+  };
+
+  const resetRuntime = createTelegramWorkerRuntime({
+    settings,
+    client: resetClient as any,
+    rpcRunner: resetRpcRunner as any,
+    statePath: resetStatePath,
+    mapPath: resetMapPath,
+    sessionDir: resetSessionDir,
+    checkTriggerPath: join(tmp, "telegram", "check.trigger.reset.json"),
+    operatorConfigPath: join(tmp, "telegram", "config.reset.json"),
+    botUsername: "tau_rhobot",
+    logPath: resetLogPath,
+  });
+
+  const resetResult = await resetRuntime.pollOnce(false);
+  assert(resetResult.ok === true, "/new poll succeeds");
+  assert(resetResult.accepted === 1, "/new update accepted");
+  assert(resetRpcCalls === 0, "/new does not invoke rpc runner");
+  assert(resetSent.length === 1, "/new sends acknowledgement message");
+  assert(resetSent[0]?.text.includes("Started a new session"), "/new acknowledgement confirms new session");
+
+  const resetMap = loadSessionMap(resetMapPath);
+  assert(typeof resetMap["dm:1111"] === "string" && resetMap["dm:1111"].length > 0, "/new writes refreshed session mapping");
+  resetRuntime.dispose();
 
   console.log("\n-- check trigger consumes + runs poll --");
   requestTelegramCheckTrigger(triggerPath, {

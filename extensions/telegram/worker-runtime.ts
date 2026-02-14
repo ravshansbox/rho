@@ -14,7 +14,7 @@ import {
   type TelegramSettings,
 } from "./lib.ts";
 import { authorizeInbound, normalizeInboundUpdate, type TelegramInboundEnvelope } from "./router.ts";
-import { resolveSessionFile } from "./session-map.ts";
+import { resetSessionFile, resolveSessionFile } from "./session-map.ts";
 import { appendTelegramLog } from "./log.ts";
 import { renderTelegramOutboundChunks } from "./outbound.ts";
 import { retryDelayMs, shouldRetryTelegramError } from "./retry.ts";
@@ -258,6 +258,20 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
 
     return `⚠️ Failed to run prompt: ${message}`;
   };
+
+  const isNewSessionCommand = (text: string): boolean => {
+    const token = String(text || "").trim().split(/\s+/, 1)[0]?.toLowerCase() || "";
+    if (!token.startsWith("/new")) return false;
+    if (token === "/new") return true;
+    if (!token.startsWith("/new@")) return false;
+
+    const target = token.slice("/new@".length);
+    if (!target) return false;
+    if (!botUsername) return true;
+    return target === botUsername.toLowerCase();
+  };
+
+  const newSessionAcknowledgement = "🆕 Started a new session for this chat.";
 
   const drainInboundQueue = async () => {
     if (drainingInbound) return;
@@ -509,6 +523,36 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
               }
             }
           }
+
+          continue;
+        }
+
+        if (isNewSessionCommand(envelope.text)) {
+          const reset = resetSessionFile(envelope, mapPath, sessionDir);
+          accepted += 1;
+          pendingOutbound.push({
+            chatId: envelope.chatId,
+            replyToMessageId: envelope.messageId,
+            text: newSessionAcknowledgement,
+            attempts: 0,
+            notBeforeMs: 0,
+          });
+
+          logEvent(
+            "session_reset",
+            {
+              updateId: envelope.updateId,
+              chatId: envelope.chatId,
+              userId: envelope.userId,
+              messageId: envelope.messageId,
+              sessionKey: reset.sessionKey,
+              sessionFile: reset.sessionFile,
+            },
+            {
+              previous_session_file: reset.previousSessionFile ?? null,
+              text_preview: envelope.text.slice(0, 160),
+            },
+          );
 
           continue;
         }
