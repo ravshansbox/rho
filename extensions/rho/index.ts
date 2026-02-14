@@ -146,6 +146,9 @@ function writeConfig(next: Partial<RhoConfig>): void {
       // ignore
     }
     if (typeof next.autoMemory === "boolean") base.autoMemory = next.autoMemory;
+    if (typeof next.decayAfterDays === "number") base.decayAfterDays = next.decayAfterDays;
+    if (typeof next.decayMinScore === "number") base.decayMinScore = next.decayMinScore;
+    if (typeof next.promptBudget === "number") base.promptBudget = next.promptBudget;
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(base, null, 2));
   } catch {
     // ignore
@@ -355,31 +358,40 @@ function formatExistingMemories(entries: Array<{ type: string; text?: string; ca
   return lines.join("\n");
 }
 
-// Cache the SOP content so we only read from disk once
-let _autoMemorySopCache: string | null = null;
-function loadAutoMemorySop(): string {
-  if (_autoMemorySopCache) return _autoMemorySopCache;
-  const sopPath = path.join(__dirname, "..", "..", "sops", "auto-memory.sop.md");
+// Cache the auto-memory workflow content so we only read from disk once
+let _autoMemorySkillCache: string | null = null;
+
+function stripMarkdownFrontmatter(markdown: string): string {
+  if (!markdown.startsWith("---\n")) return markdown;
+  const end = markdown.indexOf("\n---\n", 4);
+  if (end === -1) return markdown;
+  return markdown.slice(end + 5).trimStart();
+}
+
+function loadAutoMemorySkill(): string {
+  if (_autoMemorySkillCache) return _autoMemorySkillCache;
+  const skillPath = path.join(__dirname, "..", "..", "skills", "auto-memory", "SKILL.md");
   try {
-    _autoMemorySopCache = fs.readFileSync(sopPath, "utf-8");
+    const raw = fs.readFileSync(skillPath, "utf-8");
+    _autoMemorySkillCache = stripMarkdownFrontmatter(raw);
   } catch {
-    // Fallback if SOP file is missing (e.g., npm install without sops dir)
-    _autoMemorySopCache = [
+    // Fallback if skill file is missing
+    _autoMemorySkillCache = [
       "Extract durable learnings and user preferences from the conversation.",
       "Only extract final decisions, corrections, and verified facts.",
       "Skip intermediate discussion, transient states, and one-off tasks.",
       "Max 3 items. Return empty arrays if nothing worth extracting.",
     ].join("\n");
   }
-  return _autoMemorySopCache;
+  return _autoMemorySkillCache;
 }
 
 function buildAutoMemoryPrompt(conversationText: string, existingMemories?: string): string {
-  const sop = loadAutoMemorySop();
+  const workflow = loadAutoMemorySkill();
   const parts = [
-    "<sop>",
-    sop,
-    "</sop>",
+    "<workflow>",
+    workflow,
+    "</workflow>",
   ];
 
   if (existingMemories) {
@@ -1240,7 +1252,7 @@ Vault: longer reference material, concepts, research, linked knowledge. Searched
 
 Prefer the simplest mechanism that works:
 1. Brain entry (reminder, task, learning) — for recurring or one-off work
-2. Skill or SOP — for multi-step runbooks
+2. Skill (including kind:sop workflows) — for multi-step runbooks
 3. Bash command — for immediate system actions
 4. Code change — only when the above can't do the job`);
 
@@ -1930,7 +1942,7 @@ Instructions:
     if (!IS_SUBAGENT && ctx.hasUI) {
       const { entries } = readBrain(BRAIN_PATH);
       const brain = foldBrain(entries);
-      const lastConsolidation = brain.meta.get("memory.last_consolidation");
+      const lastConsolidation = brain.meta.get("memory_consolidate.last_consolidated_at");
       const lastTs = lastConsolidation ? new Date(lastConsolidation.value).getTime() : 0;
       const daysSince = (Date.now() - lastTs) / (1000 * 60 * 60 * 24);
 
@@ -1941,10 +1953,10 @@ Instructions:
 
       if (omitted > 0) {
         const ago = lastTs === 0 ? "never" : `${Math.floor(daysSince)}d ago`;
-        ctx.ui.notify(`🧹 ${omitted} entries over budget (last consolidation: ${ago}). Ask the agent to run the memory-clean skill`, "warning");
+        ctx.ui.notify(`🧹 ${omitted} entries over budget (last consolidation: ${ago}). Ask the agent to run the memory-consolidate skill`, "warning");
       } else if (daysSince > 1) {
         const ago = lastTs === 0 ? "never" : `${Math.floor(daysSince)}d ago`;
-        ctx.ui.notify(`🧹 Memory consolidation available (last: ${ago}). Ask the agent to run the memory-clean skill`, "info");
+        ctx.ui.notify(`🧹 Memory consolidation available (last: ${ago}). Ask the agent to run the memory-consolidate skill`, "info");
       }
     }
 
@@ -2586,6 +2598,28 @@ Instructions:
   });
 
   // /tasks and /vault commands owned by their TUI extensions (extensions/tasks, extensions/vault-search-tui)
+
+  // ── Workflow command shortcuts ───────────────────────────────────────────────
+
+  pi.registerCommand("plan", {
+    description: "Shortcut for /skill:pdd",
+    handler: async (args, ctx) => {
+      const trimmed = args.trim();
+      const command = trimmed ? `/skill:pdd ${trimmed}` : "/skill:pdd";
+      pi.sendUserMessage(command);
+      if (ctx.hasUI) ctx.ui.notify(`Forwarded to ${command}`, "info");
+    },
+  });
+
+  pi.registerCommand("code", {
+    description: "Shortcut for /skill:code-assist",
+    handler: async (args, ctx) => {
+      const trimmed = args.trim();
+      const command = trimmed ? `/skill:code-assist ${trimmed}` : "/skill:code-assist";
+      pi.sendUserMessage(command);
+      if (ctx.hasUI) ctx.ui.notify(`Forwarded to ${command}`, "info");
+    },
+  });
 
   // ── Command: /subagents ──────────────────────────────────────────────────────
 
