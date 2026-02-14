@@ -825,15 +825,9 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
         }
 
         if (item.media) {
+          let transcript = "";
           try {
-            const transcript = await withTypingIndicator(item.chatId, () => transcribeInboundMedia(item));
-            pendingOutbound.push({
-              chatId: item.chatId,
-              replyToMessageId: item.messageId,
-              text: `📝 Transcript:\n${transcript}`,
-              attempts: 0,
-              notBeforeMs: 0,
-            });
+            transcript = await withTypingIndicator(item.chatId, () => transcribeInboundMedia(item));
             logEvent(
               "inbound_media_transcribed",
               {
@@ -873,6 +867,93 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
                 error: msg,
               },
             );
+            persistOutboundQueue();
+            continue;
+          }
+
+          const promptText = transcript;
+          try {
+            const response = await withTypingIndicator(
+              item.chatId,
+              () => rpcRunner.runPrompt(item.sessionFile, promptText, foregroundPromptTimeoutMs),
+            );
+            pendingOutbound.push({
+              chatId: item.chatId,
+              replyToMessageId: item.messageId,
+              text: response || "(No response)",
+              attempts: 0,
+              notBeforeMs: 0,
+            });
+            logEvent(
+              "inbound_media_prompt_ok",
+              {
+                updateId: item.updateId,
+                chatId: item.chatId,
+                userId: item.userId,
+                messageId: item.messageId,
+                sessionKey: item.sessionKey,
+                sessionFile: item.sessionFile,
+              },
+              {
+                media_kind: item.media.kind,
+                transcript_length: transcript.length,
+                response_length: response.length,
+              },
+            );
+          } catch (error) {
+            const msg = (error as Error)?.message || String(error);
+            if (shouldDeferPromptToBackground(promptText, msg)) {
+              const queued = enqueueBackgroundPrompt(item, promptText);
+              pendingOutbound.push({
+                chatId: item.chatId,
+                replyToMessageId: item.messageId,
+                text: backgroundDeferAcknowledgement,
+                attempts: 0,
+                notBeforeMs: 0,
+              });
+              logEvent(
+                "inbound_media_prompt_deferred_background",
+                {
+                  updateId: item.updateId,
+                  chatId: item.chatId,
+                  userId: item.userId,
+                  messageId: item.messageId,
+                  sessionKey: item.sessionKey,
+                  sessionFile: item.sessionFile,
+                },
+                {
+                  media_kind: item.media.kind,
+                  transcript_length: transcript.length,
+                  background_id: queued.id,
+                  timeout_ms: foregroundPromptTimeoutMs,
+                  error: msg,
+                },
+              );
+            } else {
+              pendingOutbound.push({
+                chatId: item.chatId,
+                replyToMessageId: item.messageId,
+                text: formatPromptFailureText(promptText, msg),
+                attempts: 0,
+                notBeforeMs: 0,
+              });
+              logEvent(
+                "inbound_media_prompt_error",
+                {
+                  updateId: item.updateId,
+                  chatId: item.chatId,
+                  userId: item.userId,
+                  messageId: item.messageId,
+                  sessionKey: item.sessionKey,
+                  sessionFile: item.sessionFile,
+                },
+                {
+                  media_kind: item.media.kind,
+                  transcript_length: transcript.length,
+                  error: msg,
+                },
+              );
+            }
           }
 
           persistOutboundQueue();

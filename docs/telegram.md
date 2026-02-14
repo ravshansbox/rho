@@ -64,7 +64,7 @@ export ELEVENLABS_VOICE_ID="<voice-id>"
 
 Behavior:
 
-- Inbound `voice`, `audio`, and `document` messages with `audio/*` MIME type are transcribed and replied to with text.
+- Inbound `voice`, `audio`, and `document` messages with `audio/*` MIME type are transcribed, and that transcript is used as the prompt to rho (reply contains the assistant result, not just raw transcript).
 - `/tts <text>` generates a playable Telegram voice reply.
 - Missing key or API failures return actionable in-chat error text instead of crashing the worker.
 

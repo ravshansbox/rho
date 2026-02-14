@@ -747,10 +747,12 @@ try {
   };
 
   let sttRpcCalls = 0;
+  const sttRpcPrompts: string[] = [];
   const sttRpcRunner = {
-    async runPrompt() {
+    async runPrompt(_sessionFile: string, message: string) {
       sttRpcCalls++;
-      return "should-not-run-for-voice";
+      sttRpcPrompts.push(message);
+      return "assistant response from transcript";
     },
     dispose() {
       // no-op
@@ -795,7 +797,8 @@ try {
     const sttResult = await sttRuntime.pollOnce(false);
     assert(sttResult.ok === true, "stt scenario poll succeeds");
     assert(sttResult.accepted === 1, "stt scenario accepts inbound voice update");
-    assert(sttRpcCalls === 0, "stt scenario bypasses rpc prompt runner for media updates");
+    assert(sttRpcCalls === 1, "stt scenario treats transcript as prompt and runs rpc once");
+    assert(sttRpcPrompts[0] === "voice transcript from ElevenLabs", "stt scenario forwards transcript text to rpc prompt runner");
     assert(sttGetFileCalls.length === 1 && sttGetFileCalls[0] === "voice-file-telegram-1", "stt scenario resolves telegram file metadata from media file id");
     assert(sttDownloadCalls.length === 1 && sttDownloadCalls[0] === "voice/path-from-telegram.oga", "stt scenario downloads telegram media file for transcription");
     assert(sttFetchCalls.length === 1 && sttFetchCalls[0]?.url === "https://api.elevenlabs.io/v1/speech-to-text", "stt scenario posts media bytes to ElevenLabs STT endpoint");
@@ -805,8 +808,8 @@ try {
     assert(sttBody instanceof FormData && sttBody.get("model_id") === "scribe_v1", "stt scenario sends model_id in multipart request");
     assert(sttBody instanceof FormData && sttBody.get("file") instanceof Blob, "stt scenario sends binary media file in multipart request");
 
-    assert(sttSent.length === 1, "stt scenario sends transcript reply");
-    assert(sttSent[0]?.text.includes("voice transcript from ElevenLabs"), "stt scenario reply contains transcript text");
+    assert(sttSent.length === 1, "stt scenario sends assistant reply for transcribed prompt");
+    assert(sttSent[0]?.text.includes("assistant response from transcript"), "stt scenario reply contains assistant response");
     assert(sttActions.length >= 1, "stt scenario emits chat action while processing media");
 
     sttRuntime.dispose();
