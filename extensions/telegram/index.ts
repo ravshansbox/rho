@@ -49,8 +49,10 @@ type TelegramLogContext = {
 };
 
 export default function (pi: ExtensionAPI) {
-  const isRpcMode = process.argv.includes("--mode") && process.argv.includes("rpc");
-  if (process.env.RHO_SUBAGENT === "1" || process.env.RHO_TELEGRAM_DISABLE === "1" || isRpcMode) return;
+  // Keep telegram controls available in RPC sessions (get_commands, /telegram)
+  // so headless/web/worker surfaces can execute command passthrough consistently.
+  // Only hard-disable inside explicit subagent contexts.
+  if (process.env.RHO_SUBAGENT === "1") return;
 
   const settings = readTelegramSettings();
   const token = process.env[settings.botTokenEnv] || "";
