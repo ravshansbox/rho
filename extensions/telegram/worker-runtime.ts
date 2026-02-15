@@ -34,7 +34,7 @@ import { consumeTelegramCheckTrigger, type TelegramCheckTriggerRequestV1 } from 
 import { TelegramRpcRunner } from "./rpc.ts";
 import { upsertPendingApproval } from "./pending-approvals.ts";
 import { formatSlashPromptFailure, parseSlashInput } from "./slash-contract.ts";
-import { createSttProvider, type SttProvider } from "./stt.ts";
+import { createSttProvider, SttApiKeyMissingError, type SttProvider } from "./stt.ts";
 
 /**
  * Minimal interface matching the grammy Api methods this module uses.
@@ -376,8 +376,8 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
   const sttProvider = options.sttProvider ?? createSttProvider({
     provider: settings.sttProvider,
     apiKeyEnv: settings.sttApiKeyEnv,
-    endpoint: settings.sttEndpoint || undefined,
-    model: settings.sttModel || undefined,
+    endpoint: settings.sttEndpoint,
+    model: settings.sttModel,
   });
 
   const transcribeInboundMedia = async (item: PendingInboundItem): Promise<string> => {
@@ -402,13 +402,14 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
     return await sttProvider.transcribe(mediaBytes, mimeType, inferredName);
   };
 
-  const formatTranscriptionFailureText = (rawMessage: string): string => {
-    const message = String(rawMessage || "Voice transcription failed").trim() || "Voice transcription failed";
-
-    const envVarMatch = message.match(/^(\S+)\s+is not set$/i);
-    if (envVarMatch) {
-      return `⚠️ Voice transcription is unavailable. Set ${envVarMatch[1]} for the Telegram worker and try again.`;
+  const formatTranscriptionFailureText = (error: unknown): string => {
+    if (error instanceof SttApiKeyMissingError) {
+      return `⚠️ Voice transcription is unavailable. Set ${error.envVar} for the Telegram worker and try again.`;
     }
+
+    const message = String(
+      error instanceof Error ? error.message : error || "Voice transcription failed",
+    ).trim() || "Voice transcription failed";
 
     return `⚠️ Voice transcription failed: ${message}`;
   };
@@ -758,7 +759,7 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
               },
             );
           } catch (error) {
-            const msg = (error as Error)?.message || String(error);
+            const msg = error instanceof Error ? error.message : String(error);
             pendingOutbound.push({
               chatId: item.chatId,
               replyToMessageId: item.messageId,
@@ -779,7 +780,7 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
               },
               {
                 media_kind: item.media.kind,
-                error: msg,
+                error: error instanceof Error ? error.message : String(error),
               },
             );
             persistOutboundQueue();

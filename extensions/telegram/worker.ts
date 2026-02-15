@@ -55,8 +55,8 @@ export function runTelegramWorker(options: TelegramWorkerOptions = {}): void {
   const sttProvider = createSttProvider({
     provider: settings.sttProvider,
     apiKeyEnv: settings.sttApiKeyEnv,
-    endpoint: settings.sttEndpoint || undefined,
-    model: settings.sttModel || undefined,
+    endpoint: settings.sttEndpoint,
+    model: settings.sttModel,
   });
 
   const lockPath = options.lockPath ?? TELEGRAM_WORKER_LOCK_PATH;

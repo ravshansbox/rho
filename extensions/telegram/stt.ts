@@ -10,6 +10,15 @@ export interface SttProviderConfig {
   model?: string;
 }
 
+export class SttApiKeyMissingError extends Error {
+  public readonly envVar: string;
+  constructor(envVar: string) {
+    super(`${envVar} is not set`);
+    this.name = "SttApiKeyMissingError";
+    this.envVar = envVar;
+  }
+}
+
 export function extractTranscriptText(payload: unknown): string {
   if (!payload || typeof payload !== "object") return "";
   const candidate = payload as Record<string, unknown>;
@@ -51,7 +60,7 @@ class ElevenLabsSttProvider implements SttProvider {
   async transcribe(audio: Uint8Array, mimeType: string, fileName: string): Promise<string> {
     const apiKey = (process.env[this.apiKeyEnv] || "").trim();
     if (!apiKey) {
-      throw new Error(`${this.apiKeyEnv} is not set`);
+      throw new SttApiKeyMissingError(this.apiKeyEnv);
     }
 
     const form = new FormData();
@@ -98,14 +107,16 @@ class OpenAiSttProvider implements SttProvider {
 
   constructor(config: SttProviderConfig) {
     this.apiKeyEnv = config.apiKeyEnv;
-    this.baseUrl = (config.endpoint || "https://api.openai.com").replace(/\/+$/, "");
+    this.baseUrl = (config.endpoint || "https://api.openai.com")
+      .replace(/\/+$/, "")
+      .replace(/\/v1$/, "");
     this.model = config.model || "whisper-1";
   }
 
   async transcribe(audio: Uint8Array, mimeType: string, fileName: string): Promise<string> {
     const apiKey = (process.env[this.apiKeyEnv] || "").trim();
     if (!apiKey) {
-      throw new Error(`${this.apiKeyEnv} is not set`);
+      throw new SttApiKeyMissingError(this.apiKeyEnv);
     }
 
     const form = new FormData();
@@ -152,7 +163,9 @@ export function createSttProvider(config: SttProviderConfig): SttProvider {
       return new ElevenLabsSttProvider(config);
     case "openai":
       return new OpenAiSttProvider(config);
-    default:
-      throw new Error(`Unknown STT provider: ${(config as SttProviderConfig).provider}`);
+    default: {
+      const _exhaustive: never = config.provider;
+      throw new Error(`Unknown STT provider: ${_exhaustive}`);
+    }
   }
 }
