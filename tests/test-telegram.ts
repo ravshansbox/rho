@@ -273,6 +273,7 @@ try {
       allowedChatIds: [777],
       allowedUserIds: [42],
       requireMentionInGroups: true,
+      threadedMode: false,
     };
 
     const authOk = authorizeInbound(normalized!, settings);
@@ -369,6 +370,10 @@ try {
     // Same chat without thread = original key (backward compat)
     const noThreadEnvelope = { ...threadedEnvelope, messageThreadId: undefined };
     assert(sessionKeyForEnvelope(noThreadEnvelope) === "dm:555", "no thread falls back to flat key");
+
+    // Thread ID 0 (general/default topic) = flat key, not topic:0
+    const generalTopicEnvelope = { ...threadedEnvelope, messageThreadId: 0 };
+    assert(sessionKeyForEnvelope(generalTopicEnvelope) === "dm:555", "thread id 0 (general topic) uses flat key");
 
     // Group with thread
     const groupThreadEnvelope = { ...threadedEnvelope, chatId: -1001, chatType: "group" as const, messageThreadId: 3 };
@@ -1307,6 +1312,7 @@ try {
       allowedChatIds: [777],
       allowedUserIds: [42],
       requireMentionInGroups: true,
+      threadedMode: false,
     };
 
     const auth = authorizeInbound(normalized!, settings);

@@ -1230,6 +1230,11 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
         const envelope = normalizeInboundUpdate(update);
         if (!envelope) continue;
 
+        // Strip thread context when threaded mode is disabled
+        if (!settings.threadedMode) {
+          envelope.messageThreadId = undefined;
+        }
+
         const auth = authorizeInbound(envelope, effectiveAuthSettings(), botUsername || undefined, strictAllowlist);
         if (!auth.ok) {
           blocked += 1;

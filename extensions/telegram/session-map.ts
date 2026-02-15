@@ -16,7 +16,7 @@ export type SessionMap = Record<string, string>;
 
 export function sessionKeyForEnvelope(envelope: TelegramInboundEnvelope): string {
 	const base = envelope.chatType === "private" ? `dm:${envelope.chatId}` : `group:${envelope.chatId}`;
-	if (typeof envelope.messageThreadId === "number") {
+	if (typeof envelope.messageThreadId === "number" && envelope.messageThreadId > 0) {
 		return `${base}:topic:${envelope.messageThreadId}`;
 	}
 	return base;
