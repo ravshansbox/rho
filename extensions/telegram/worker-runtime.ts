@@ -6,6 +6,8 @@ import {
   HttpError,
   InputFile,
   isTelegramParseModeError,
+  isRetryableAfterAutoRetry,
+  queueRetryDelayMs,
   downloadFile as downloadTelegramFile,
   type Update,
   type Message,
@@ -1082,6 +1084,7 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
 
       const chunks = renderTelegramOutboundChunks(item.text);
       let failed = false;
+      let requeued = false;
 
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
@@ -1148,9 +1151,27 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
             },
           );
 
-          // Auto-retry already exhausted transient retries — permanent failure
-          pendingOutbound.splice(index, 1);
-          persistOutboundQueue();
+          if (isRetryableAfterAutoRetry(error, item.attempts)) {
+            const delay = queueRetryDelayMs(item.attempts);
+            pendingOutbound[index] = {
+              ...item,
+              attempts: item.attempts + 1,
+              notBeforeMs: Date.now() + delay,
+            };
+            persistOutboundQueue();
+            requeued = true;
+            logEvent(
+              "outbound_retry_scheduled",
+              { chatId: item.chatId },
+              {
+                attempts: item.attempts + 1,
+                retry_in_ms: delay,
+              },
+            );
+          } else {
+            pendingOutbound.splice(index, 1);
+            persistOutboundQueue();
+          }
           break;
         }
       }
@@ -1161,6 +1182,9 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
         continue;
       }
 
+      if (requeued) {
+        index += 1;
+      }
     }
     } finally {
       flushingOutbound = false;

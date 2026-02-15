@@ -5,7 +5,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
-import { Api, isTelegramParseModeError } from "./api.ts";
+import { Api, isTelegramParseModeError, isRetryableAfterAutoRetry, queueRetryDelayMs } from "./api.ts";
 import { autoRetry } from "@grammyjs/auto-retry";
 import {
   loadRuntimeState,
@@ -313,7 +313,22 @@ export default function (pi: ExtensionAPI) {
             },
           );
 
-          if (ctx.hasUI) {
+          if (isRetryableAfterAutoRetry(error, item.attempts)) {
+            const delay = queueRetryDelayMs(item.attempts);
+            deferred.push({
+              ...item,
+              attempts: item.attempts + 1,
+              notBeforeMs: Date.now() + delay,
+            });
+            logEvent(
+              "outbound_retry_scheduled",
+              { chatId: item.chatId },
+              {
+                attempts: item.attempts + 1,
+                retry_in_ms: delay,
+              },
+            );
+          } else if (ctx.hasUI) {
             ctx.ui.notify(`Telegram send failed: ${msg}`, "warning");
           }
           break;

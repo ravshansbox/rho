@@ -436,7 +436,7 @@ try {
   assert(persistedFailed.last_check_outcome === "error", "runtime state persists error check outcome");
   assert(persistedFailed.last_check_requester_pid === 9001, "runtime state persists requester pid for failed check");
 
-  console.log("\n-- permanent send failure removes outbound item from queue --");
+  console.log("\n-- retryable send failure (429) keeps outbound item queued --");
   const durableOutboundDir = join(tmp, "telegram-durable-outbound");
   const durableOutboundQueuePath = join(durableOutboundDir, "outbound.queue.json");
   const durableOutboundStatePath = join(durableOutboundDir, "state.json");
@@ -469,11 +469,55 @@ try {
     logPath: join(durableOutboundDir, "log.jsonl"),
   });
   const retryResult = await retryRuntime.pollOnce(false);
-  assert(retryResult.ok === true, "permanent failure scenario poll succeeds");
-  assert(retrySendAttempts >= 1, "permanent failure scenario attempts outbound send");
-  assert(retryRuntime.getSnapshot().pendingOutbound === 0, "permanent failure removes outbound item from queue");
+  assert(retryResult.ok === true, "retry scenario poll succeeds");
+  assert(retrySendAttempts >= 1, "retry scenario attempts outbound send");
+  assert(retryRuntime.getSnapshot().pendingOutbound === 1, "retryable failure keeps outbound item queued");
+  assert(existsSync(durableOutboundQueuePath), "retry scenario persists outbound queue file");
+
+  const persistedOutboundQueue = existsSync(durableOutboundQueuePath)
+    ? JSON.parse(readFileSync(durableOutboundQueuePath, "utf-8")) as any[]
+    : [];
+  assert(Array.isArray(persistedOutboundQueue) && persistedOutboundQueue.length === 1, "retry scenario persists queued outbound item");
+  assert(persistedOutboundQueue[0].attempts === 1, "retry scenario increments attempt counter");
+  assert(persistedOutboundQueue[0].notBeforeMs > 0, "retry scenario sets backoff delay");
 
   retryRuntime.dispose();
+
+  console.log("\n-- permanent send failure (400) removes outbound item from queue --");
+  const permFailDir = join(tmp, "telegram-perm-fail");
+  const permFailQueuePath = join(permFailDir, "outbound.queue.json");
+  const permFailStatePath = join(permFailDir, "state.json");
+  const permFailMapPath = join(permFailDir, "session-map.json");
+  const permFailSessionDir = join(tmp, "sessions-perm-fail");
+
+  const permFailClient = {
+    async getUpdates() {
+      return updates;
+    },
+    async sendMessage(_chat_id: number, _text: string, _other?: any) {
+      throw new GrammyError("Bad Request", { ok: false, error_code: 400, description: "Bad Request: chat not found" }, "sendMessage", {});
+    },
+    async sendChatAction() {
+      return true;
+    },
+  };
+  const permFailRuntime = createTelegramWorkerRuntime({
+    settings,
+    client: permFailClient as any,
+    rpcRunner: rpcRunner as any,
+    statePath: permFailStatePath,
+    mapPath: permFailMapPath,
+    sessionDir: permFailSessionDir,
+    checkTriggerPath: join(permFailDir, "check.trigger.json"),
+    operatorConfigPath: join(permFailDir, "config.json"),
+    botUsername: "",
+    logPath: join(permFailDir, "log.jsonl"),
+  });
+  const permFailResult = await permFailRuntime.pollOnce(false);
+  assert(permFailResult.ok === true, "permanent failure scenario poll succeeds");
+  assert(permFailRuntime.getSnapshot().pendingOutbound === 0, "permanent failure removes outbound item from queue");
+
+  permFailRuntime.dispose();
 
   console.log("\n-- durable outbound queue resumes persisted items on restart --");
   // Seed the queue file directly to test resume-on-restart

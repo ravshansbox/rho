@@ -28,6 +28,26 @@ export function isTelegramParseModeError(error: unknown): boolean {
   );
 }
 
+/**
+ * Should a failed send be re-queued for a later flush cycle?
+ * Called AFTER auto-retry already exhausted its within-call retries.
+ * Returns true for transient errors (429, 5xx, transport) that may
+ * resolve on a later attempt; false for permanent client errors (4xx).
+ */
+export function isRetryableAfterAutoRetry(error: unknown, attempt: number, maxAttempts = 6): boolean {
+  if (attempt >= maxAttempts) return false;
+  if (error instanceof HttpError) return true;
+  if (!(error instanceof GrammyError)) return false;
+  if (error.error_code === 429) return true;
+  if (error.error_code >= 500) return true;
+  return false;
+}
+
+export function queueRetryDelayMs(attempt: number): number {
+  const base = 2000;
+  return Math.min(60_000, base * Math.pow(2, Math.max(0, attempt)));
+}
+
 /* ------------------------------------------------------------------ */
 /*  File download helper (grammy doesn't provide raw file download)    */
 /* ------------------------------------------------------------------ */
