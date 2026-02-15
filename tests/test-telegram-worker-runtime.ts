@@ -3,7 +3,7 @@
  * Run: npx tsx tests/test-telegram-worker-runtime.ts
  */
 
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -436,7 +436,7 @@ try {
   assert(persistedFailed.last_check_outcome === "error", "runtime state persists error check outcome");
   assert(persistedFailed.last_check_requester_pid === 9001, "runtime state persists requester pid for failed check");
 
-  console.log("\n-- durable outbound queue persists retry and resumes on restart --");
+  console.log("\n-- permanent send failure removes outbound item from queue --");
   const durableOutboundDir = join(tmp, "telegram-durable-outbound");
   const durableOutboundQueuePath = join(durableOutboundDir, "outbound.queue.json");
   const durableOutboundStatePath = join(durableOutboundDir, "state.json");
@@ -456,7 +456,6 @@ try {
       return true;
     },
   };
-
   const retryRuntime = createTelegramWorkerRuntime({
     settings,
     client: retryingClient as any,
@@ -469,20 +468,19 @@ try {
     botUsername: "",
     logPath: join(durableOutboundDir, "log.jsonl"),
   });
-
   const retryResult = await retryRuntime.pollOnce(false);
-  assert(retryResult.ok === true, "retry scenario poll succeeds");
-  assert(retrySendAttempts >= 1, "retry scenario attempts outbound send");
-  assert(retryRuntime.getSnapshot().pendingOutbound === 1, "retry scenario leaves outbound item queued");
-  assert(existsSync(durableOutboundQueuePath), "retry scenario persists outbound queue file");
-
-  const persistedOutboundQueue = existsSync(durableOutboundQueuePath)
-    ? JSON.parse(readFileSync(durableOutboundQueuePath, "utf-8")) as any[]
-    : [];
-  assert(Array.isArray(persistedOutboundQueue) && persistedOutboundQueue.length === 1, "retry scenario persists queued outbound item");
+  assert(retryResult.ok === true, "permanent failure scenario poll succeeds");
+  assert(retrySendAttempts >= 1, "permanent failure scenario attempts outbound send");
+  assert(retryRuntime.getSnapshot().pendingOutbound === 0, "permanent failure removes outbound item from queue");
 
   retryRuntime.dispose();
 
+  console.log("\n-- durable outbound queue resumes persisted items on restart --");
+  // Seed the queue file directly to test resume-on-restart
+  mkdirSync(durableOutboundDir, { recursive: true });
+  writeFileSync(durableOutboundQueuePath, JSON.stringify([
+    { chatId: 100, replyToMessageId: 1, text: "persisted msg", attempts: 0, notBeforeMs: 0 },
+  ]));
   const resumedOutboundSent: Array<{ chat_id: number; text: string }> = [];
   const resumedOutboundClient = {
     async getUpdates() {
@@ -496,7 +494,6 @@ try {
       return true;
     },
   };
-
   const resumedOutboundRuntime = createTelegramWorkerRuntime({
     settings,
     client: resumedOutboundClient as any,
@@ -509,16 +506,13 @@ try {
     botUsername: "",
     logPath: join(durableOutboundDir, "log.jsonl"),
   });
-
   const resumedOutboundResult = await resumedOutboundRuntime.pollOnce(false);
   assert(resumedOutboundResult.ok === true, "resumed outbound scenario poll succeeds");
   assert(resumedOutboundSent.length === 1, "resumed outbound scenario flushes persisted queue item");
-
   const drainedOutboundQueue = existsSync(durableOutboundQueuePath)
     ? JSON.parse(readFileSync(durableOutboundQueuePath, "utf-8")) as any[]
     : null;
   assert(Array.isArray(drainedOutboundQueue) && drainedOutboundQueue.length === 0, "resumed outbound scenario drains persisted queue file");
-
   resumedOutboundRuntime.dispose();
 
   console.log("\n-- durable inbound queue resumes persisted work after restart --");

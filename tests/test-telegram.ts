@@ -21,7 +21,6 @@ import { authorizeInbound, normalizeInboundUpdate } from "../extensions/telegram
 import { loadSessionMap, resolveSessionFile, sessionKeyForEnvelope } from "../extensions/telegram/session-map.ts";
 import { TelegramRpcRunner } from "../extensions/telegram/rpc.ts";
 import { chunkTelegramText, renderOutboundText, renderTelegramOutboundChunks } from "../extensions/telegram/outbound.ts";
-import { retryDelayMs, shouldRetryTelegramError } from "../extensions/telegram/retry.ts";
 import { appendTelegramLog } from "../extensions/telegram/log.ts";
 import { loadOperatorConfig, saveOperatorConfig } from "../extensions/telegram/operator-config.ts";
 import {
@@ -977,20 +976,6 @@ try {
     assert(isTelegramParseModeError(new Error("nope")) === false, "non-telegram errors are ignored");
   }
 
-  console.log("\n-- retry policy helpers --");
-  {
-    const e429 = new GrammyError("rate", {error_code: 429, description: "rate", parameters: {retry_after: 2}}, "sendMessage", {});
-    assert(shouldRetryTelegramError(e429, 0) === true, "retry 429 on first attempt");
-    assert(retryDelayMs(e429, 0) === 2000, "retry_after overrides delay");
-
-    const e500 = new GrammyError("server", {error_code: 500, description: "server"}, "sendMessage", {});
-    assert(shouldRetryTelegramError(e500, 1) === true, "retry 5xx errors");
-    assert(retryDelayMs(e500, 2) === 4000, "backoff for non-retry_after error");
-
-    const e400 = new GrammyError("bad", {error_code: 400, description: "bad"}, "sendMessage", {});
-    assert(shouldRetryTelegramError(e400, 0) === false, "do not retry 4xx non-rate-limit");
-    assert(shouldRetryTelegramError(e500, 3) === false, "respect max attempt cap");
-  }
 
   console.log("\n-- slash acknowledgement formatting --");
   {

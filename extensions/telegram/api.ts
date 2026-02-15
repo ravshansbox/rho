@@ -5,19 +5,15 @@
  * can import them from a single canonical location.
  */
 
-import { Api, GrammyError, InputFile } from "grammy";
+import { Api, GrammyError, HttpError, InputFile } from "grammy";
 import type { Update, Message, User, Chat, File } from "@grammyjs/types";
 
-export { Api, GrammyError, InputFile };
+export { Api, GrammyError, HttpError, InputFile };
 export type { Update, Message, User, Chat, File };
 
 /* ------------------------------------------------------------------ */
 /*  Error utilities                                                    */
 /* ------------------------------------------------------------------ */
-
-export function isGrammyError(error: unknown): error is GrammyError {
-  return error instanceof GrammyError;
-}
 
 export function isTelegramParseModeError(error: unknown): boolean {
   if (!(error instanceof GrammyError)) return false;
@@ -30,12 +26,6 @@ export function isTelegramParseModeError(error: unknown): boolean {
     || message.includes("unsupported start tag")
     || message.includes("entity")
   );
-}
-
-export function retryAfterSeconds(error: unknown): number | undefined {
-  if (!(error instanceof GrammyError)) return undefined;
-  const value = error.parameters?.retry_after;
-  return typeof value === "number" ? value : undefined;
 }
 
 /* ------------------------------------------------------------------ */

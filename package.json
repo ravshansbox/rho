@@ -50,6 +50,7 @@
     "telegram:smoke": "npx -y tsx scripts/telegram-smoke.ts"
   },
   "dependencies": {
+    "@grammyjs/auto-retry": "^2.0.2",
     "@hono/node-server": "^1.13.1",
     "@hono/node-ws": "^1.0.7",
     "grammy": "^1.40.0",

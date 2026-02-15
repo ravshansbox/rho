@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 
 import {
   GrammyError,
+  HttpError,
   InputFile,
   isTelegramParseModeError,
   downloadFile as downloadTelegramFile,
@@ -25,7 +26,6 @@ import { authorizeInbound, normalizeInboundUpdate, type TelegramInboundEnvelope 
 import { resetSessionFile, resolveSessionFile } from "./session-map.ts";
 import { appendTelegramLog } from "./log.ts";
 import { renderTelegramOutboundChunks } from "./outbound.ts";
-import { retryDelayMs, shouldRetryTelegramError } from "./retry.ts";
 import { loadOperatorConfig } from "./operator-config.ts";
 import { consumeTelegramCheckTrigger, type TelegramCheckTriggerRequestV1 } from "./check-trigger.ts";
 import { TelegramRpcRunner } from "./rpc.ts";
@@ -534,93 +534,43 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
       throw new Error("Telegram voice delivery is unavailable in this worker build");
     }
 
-    let attempt = 0;
-    while (true) {
-      try {
-        await withChatAction(item.chatId, "upload_voice", async () => {
-          if (client.sendVoice) {
-            await client.sendVoice(
-              item.chatId,
-              new InputFile(audio.bytes, audio.fileName),
-              { reply_parameters: { message_id: item.messageId } },
-            );
-            return;
-          }
-
-          if (client.sendAudio) {
-            await client.sendAudio(
-              item.chatId,
-              new InputFile(audio.bytes, audio.fileName),
-              {
-                title: "rho /tts",
-                reply_parameters: { message_id: item.messageId },
-              },
-            );
-            return;
-          }
-        });
-
-        logEvent(
-          "outbound_media_sent",
+    await withChatAction(item.chatId, "upload_voice", async () => {
+      if (client.sendVoice) {
+        await client.sendVoice(
+          item.chatId,
+          new InputFile(audio.bytes, audio.fileName),
+          { reply_parameters: { message_id: item.messageId } },
+        );
+        return;
+      }
+      if (client.sendAudio) {
+        await client.sendAudio(
+          item.chatId,
+          new InputFile(audio.bytes, audio.fileName),
           {
-            updateId: item.updateId,
-            chatId: item.chatId,
-            userId: item.userId,
-            messageId: item.messageId,
-            sessionKey: item.sessionKey,
-            sessionFile: item.sessionFile,
-          },
-          {
-            attempts: attempt,
-            bytes: audio.bytes.length,
-            mime_type: audio.mimeType,
+            title: "rho /tts",
+            reply_parameters: { message_id: item.messageId },
           },
         );
         return;
-      } catch (error) {
-        const msg = (error as Error)?.message || String(error);
-
-        logEvent(
-          "outbound_media_error",
-          {
-            updateId: item.updateId,
-            chatId: item.chatId,
-            userId: item.userId,
-            messageId: item.messageId,
-            sessionKey: item.sessionKey,
-            sessionFile: item.sessionFile,
-          },
-          {
-            attempts: attempt,
-            error: msg,
-          },
-        );
-
-        if (!shouldRetryTelegramError(error, attempt)) {
-          throw error;
-        }
-
-        const delay = retryDelayMs(error, attempt);
-        logEvent(
-          "outbound_media_retry_scheduled",
-          {
-            updateId: item.updateId,
-            chatId: item.chatId,
-            userId: item.userId,
-            messageId: item.messageId,
-            sessionKey: item.sessionKey,
-            sessionFile: item.sessionFile,
-          },
-          {
-            attempts: attempt + 1,
-            retry_in_ms: delay,
-          },
-        );
-
-        attempt += 1;
-        await waitMs(delay);
       }
-    }
+    });
+
+    logEvent(
+      "outbound_media_sent",
+      {
+        updateId: item.updateId,
+        chatId: item.chatId,
+        userId: item.userId,
+        messageId: item.messageId,
+        sessionKey: item.sessionKey,
+        sessionFile: item.sessionFile,
+      },
+      {
+        bytes: audio.bytes.length,
+        mime_type: audio.mimeType,
+      },
+    );
   };
 
   const formatTtsFailureText = (rawMessage: string): string => {
@@ -1132,7 +1082,6 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
 
       const chunks = renderTelegramOutboundChunks(item.text);
       let failed = false;
-      let retryScheduled = false;
 
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
@@ -1199,28 +1148,9 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
             },
           );
 
-          if (shouldRetryTelegramError(error, item.attempts)) {
-            const delay = retryDelayMs(error, item.attempts);
-            pendingOutbound[index] = {
-              ...item,
-              attempts: item.attempts + 1,
-              notBeforeMs: Date.now() + delay,
-            };
-            persistOutboundQueue();
-            retryScheduled = true;
-            logEvent(
-              "outbound_retry_scheduled",
-              { chatId: item.chatId },
-              {
-                attempts: item.attempts + 1,
-                retry_in_ms: delay,
-              },
-            );
-          } else {
-            pendingOutbound.splice(index, 1);
-            persistOutboundQueue();
-          }
-
+          // Auto-retry already exhausted transient retries — permanent failure
+          pendingOutbound.splice(index, 1);
+          persistOutboundQueue();
           break;
         }
       }
@@ -1231,9 +1161,6 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
         continue;
       }
 
-      if (retryScheduled) {
-        index += 1;
-      }
     }
     } finally {
       flushingOutbound = false;
@@ -1391,7 +1318,7 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
     } catch (error) {
       runtimeState = markPollFailure(runtimeState);
       persistRuntimeState();
-      const msg = error instanceof GrammyError ? error.message : (error as Error)?.message || String(error);
+      const msg = (error instanceof GrammyError || error instanceof HttpError) ? error.message : (error as Error)?.message || String(error);
       logEvent("poll_error", {}, {
         error: msg,
         last_update_id: runtimeState.last_update_id,

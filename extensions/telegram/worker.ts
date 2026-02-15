@@ -1,4 +1,5 @@
 import { Api } from "./api.ts";
+import { autoRetry } from "@grammyjs/auto-retry";
 import { readTelegramSettings, TELEGRAM_WORKER_LOCK_PATH } from "./lib.ts";
 import {
   createTelegramWorkerLockState,
@@ -48,6 +49,7 @@ export function runTelegramWorker(options: TelegramWorkerOptions = {}): void {
 
   const botUsername = (process.env.TELEGRAM_BOT_USERNAME || "").replace(/^@/, "").trim();
   const client = new Api(token);
+  client.config.use(autoRetry({ maxRetryAttempts: 3, maxDelaySeconds: 30 }));
 
   const lockPath = options.lockPath ?? TELEGRAM_WORKER_LOCK_PATH;
   const refreshMs = options.refreshMs

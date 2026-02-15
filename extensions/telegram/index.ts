@@ -6,6 +6,7 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
 import { Api, isTelegramParseModeError } from "./api.ts";
+import { autoRetry } from "@grammyjs/auto-retry";
 import {
   loadRuntimeState,
   readTelegramSettings,
@@ -15,7 +16,6 @@ import {
 import { appendTelegramLog } from "./log.ts";
 import { loadSessionMap } from "./session-map.ts";
 import { renderTelegramOutboundChunks } from "./outbound.ts";
-import { retryDelayMs, shouldRetryTelegramError } from "./retry.ts";
 import { loadOperatorConfig, saveOperatorConfig } from "./operator-config.ts";
 import { getTelegramCheckTriggerState, requestTelegramCheckTrigger } from "./check-trigger.ts";
 import { renderTelegramStatusText, renderTelegramUiStatus } from "./status.ts";
@@ -72,6 +72,7 @@ export default function (pi: ExtensionAPI) {
   let lastCheckRequestAtMs: number | null = null;
 
   const client = token.trim() ? new Api(token.trim()) : null;
+  if (client) client.config.use(autoRetry({ maxRetryAttempts: 3, maxDelaySeconds: 30 }));
 
   const persistOperator = () => {
     saveOperatorConfig({
@@ -312,22 +313,7 @@ export default function (pi: ExtensionAPI) {
             },
           );
 
-          if (shouldRetryTelegramError(error, item.attempts)) {
-            const delay = retryDelayMs(error, item.attempts);
-            deferred.push({
-              ...item,
-              attempts: item.attempts + 1,
-              notBeforeMs: Date.now() + delay,
-            });
-            logEvent(
-              "outbound_retry_scheduled",
-              { chatId: item.chatId },
-              {
-                attempts: item.attempts + 1,
-                retry_in_ms: delay,
-              },
-            );
-          } else if (ctx.hasUI) {
+          if (ctx.hasUI) {
             ctx.ui.notify(`Telegram send failed: ${msg}`, "warning");
           }
           break;
