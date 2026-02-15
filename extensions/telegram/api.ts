@@ -51,6 +51,11 @@ export function queueRetryDelayMs(error: unknown, attempt: number): number {
   return Math.min(60_000, base * Math.pow(2, Math.max(0, attempt)));
 }
 
+/** Build reply_parameters for grammy sendMessage calls. */
+export function replyParams(messageId: number | undefined): Record<string, unknown> {
+  return messageId ? { reply_parameters: { message_id: messageId } } : {};
+}
+
 /* ------------------------------------------------------------------ */
 /*  File download helper (grammy doesn't provide raw file download)    */
 /* ------------------------------------------------------------------ */

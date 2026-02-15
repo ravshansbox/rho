@@ -5,7 +5,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
-import { Api, isTelegramParseModeError, isRetryableAfterAutoRetry, queueRetryDelayMs } from "./api.ts";
+import { Api, isTelegramParseModeError, isRetryableAfterAutoRetry, queueRetryDelayMs, replyParams } from "./api.ts";
 import { autoRetry } from "@grammyjs/auto-retry";
 import {
   loadRuntimeState,
@@ -227,11 +227,6 @@ export default function (pi: ExtensionAPI) {
     }
 
     return requested;
-  };
-
-  /** Helper: build reply_parameters for grammy sendMessage calls. */
-  const replyParams = (messageId: number | undefined) => {
-    return messageId ? { reply_parameters: { message_id: messageId } } : {};
   };
 
   const flushOutboundQueue = async (ctx: ExtensionContext) => {

@@ -8,6 +8,7 @@ import {
   isTelegramParseModeError,
   isRetryableAfterAutoRetry,
   queueRetryDelayMs,
+  replyParams,
   downloadFile as downloadTelegramFile,
   type Update,
   type Message,
@@ -658,11 +659,6 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
   };
 
   const newSessionAcknowledgement = "🆕 Started a new session for this chat.";
-
-  /** Helper: build reply_parameters for grammy sendMessage calls. */
-  const replyParams = (messageId: number | undefined) => {
-    return messageId ? { reply_parameters: { message_id: messageId } } : {};
-  };
 
   const pumpBackgroundQueue = async () => {
     if (backgroundPumpInFlight || disposed) return;
