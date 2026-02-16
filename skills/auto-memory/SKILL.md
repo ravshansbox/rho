@@ -1,3 +1,9 @@
+---
+name: auto-memory
+description: Extract durable learnings and preferences from conversations for automatic memory capture.
+kind: sop
+---
+
 # Auto-Memory Extraction
 
 ## Overview

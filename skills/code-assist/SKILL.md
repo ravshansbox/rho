@@ -1,3 +1,9 @@
+---
+name: code-assist
+description: Implement coding tasks with an explore-plan-code workflow and explicit verification gates.
+kind: sop
+---
+
 # Code Assist
 
 ## Overview

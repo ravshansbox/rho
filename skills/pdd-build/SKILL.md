@@ -1,3 +1,9 @@
+---
+name: pdd-build
+description: Execute a completed PDD implementation plan step-by-step with validation gates.
+kind: sop
+---
+
 # PDD Build
 
 ## Overview

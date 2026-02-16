@@ -12,6 +12,21 @@ site/node_modules/
 skills/*/
 
 # Whitelist tracked skills
+!skills/auto-memory/
+!skills/code-assist/
+!skills/code-task-generator/
+!skills/codebase-summary/
+!skills/create-sop/
+!skills/eval/
+!skills/memory-consolidate/
+!skills/pdd/
+!skills/pdd-build/
+!skills/rho-cloud-onboard/
+!skills/rho-cloud-email/
+!skills/session-search/
+!skills/small-improvement/
+!skills/update-pi/
+!skills/vault-clean/
 !skills/tasker-xml/
 !skills/termux-clipboard/
 !skills/termux-contacts/
@@ -23,14 +38,6 @@ skills/*/
 !skills/termux-sms/
 !skills/termux-stt/
 !skills/termux-tts/
-!skills/update-pi/
-!skills/rho-cloud-onboard/
-!skills/rho-cloud-email/
-!skills/rho-onboard/
-!skills/memory-clean/
-!skills/session-search/
-!skills/vault-clean/
-!skills/soul-update/
 .worktrees/
 
 # Local SOP planning artifacts

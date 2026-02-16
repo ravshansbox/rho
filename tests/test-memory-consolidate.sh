@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# test-memory-consolidate.sh — LLM-in-the-loop test for the memory-consolidate SOP.
+# test-memory-consolidate.sh — LLM-in-the-loop test for the memory-consolidate skill.
 #
 # Creates a synthetic brain.jsonl full of problems (dupes, near-dupes, stale,
-# merge candidates, contradictions), runs pi --no-session with the SOP,
+# merge candidates, contradictions), runs pi --no-session with the skill,
 # then validates the result.
 #
 # Usage:
@@ -70,7 +70,7 @@ echo ""
 
 # ── Build the prompt ───────────────────────────────────────────────
 
-SOP_PATH="$(pwd)/sops/memory-consolidate.sop.md"
+SKILL_PATH="$(pwd)/skills/memory-consolidate/SKILL.md"
 
 DRY_FLAG=""
 if $DRY_RUN; then
@@ -79,13 +79,13 @@ fi
 
 PROMPT="You are running memory consolidation on a brain.jsonl file.
 
-Follow the SOP at: $SOP_PATH
+Follow the skill at: $SKILL_PATH
 
 The brain tool is already configured to use the file at: $BRAIN
 
 $DRY_FLAG
 
-Start by running brain action=list to inventory entries, then follow every step in the SOP.
+Start by running brain action=list to inventory entries, then follow every step in the skill.
 At the end, output your consolidation report."
 
 echo "=== Running pi --no-session ==="

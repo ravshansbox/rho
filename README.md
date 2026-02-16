@@ -104,6 +104,8 @@ Inside a session:
 /subagents            Check spawned subagent status
 /vault inbox          View captured items
 /brain                Interact with memory
+/skill run pdd           Run the Prompt-Driven Development workflow
+/skill run code-assist   Run the code implementation workflow
 ```
 
 ## What it does
@@ -207,14 +209,14 @@ See full setup and smoke validation guide: [docs/telegram.md](docs/telegram.md).
 | `tasker-xml` | ✓ | | | Create Tasker automations |
 | `rho-cloud-onboard` | ✓ | ✓ | ✓ | Register an agent email address |
 | `rho-cloud-email` | ✓ | ✓ | ✓ | Manage agent email address |
-| `memory-clean` | ✓ | ✓ | ✓ | Consolidate memory, decay stale entries, optional session mining |
+| `memory-consolidate` | ✓ | ✓ | ✓ | Consolidate memory, decay stale entries, and mine sessions since last consolidation |
 | `update-pi` | ✓ | ✓ | ✓ | Update pi to latest version |
 
 ### Extensions
 
 | Extension | Platforms | Description |
 |-----------|-----------|-------------|
-| `rho/` | All | Heartbeat, memory, tasks, and vault tooling |
+| `rho/` | All | Heartbeat, memory, tasks, vault tooling, plus workflow aliases (`/plan`, `/code`) |
 | `brave-search/` | All | Web search via Brave API |
 | `x-search/` | All | X (Twitter) search via xAI Grok (`x_search`) |
 | `telegram/` | All | Telegram adapter (polling MVP, chat/session bridge, operator controls) |
@@ -227,6 +229,8 @@ See full setup and smoke validation guide: [docs/telegram.md](docs/telegram.md).
 ### Skills vs extensions
 
 Skills are markdown files. The agent reads them and follows the instructions using its built-in tools (bash, read, write, edit). No code runs. Think of them as runbooks. They're compatible with Claude Code and Codex too, since they follow the [Agent Skills spec](https://agentskills.io).
+
+SOPs are a **skill subtype** (`kind: sop` in frontmatter). Run them with `/skill run <name>` — there is no separate legacy sop command surface.
 
 Extensions are TypeScript that runs inside pi's process. They register new tools the LLM can call, hook into lifecycle events, persist state, add commands, and build custom UI. The heartbeat, the brain, and the vault are all extensions.
 
@@ -301,15 +305,17 @@ brain action=add type=task text="Review PRs" priority=high
 
 ### Auto-extraction
 
-The `memory-clean` skill runs automatically to:
+The `memory-consolidate` skill runs to:
 - **Decay** stale learnings (>90 days, low score)
 - **Consolidate** duplicates and merge related entries
-- **Mine sessions** for new learnings and preferences
+- **Mine sessions** since the last consolidation checkpoint
+- **Relocate** reference-heavy entries to the vault for ad-hoc search
 
 Run manually:
 ```
-Run memory-clean with session mining
+Run memory-consolidate with session mining
 ```
+
 
 ### Vault
 
@@ -362,7 +368,10 @@ rho/
 │   └── lib/                  # shared modules (NOT an extension)
 │       └── mod.ts            # barrel exports (do not name this index.ts)
 ├── skills/                  # Core skills (loaded via pi package entry)
-│   ├── memory-clean/
+│   ├── memory-consolidate/
+│   ├── pdd/
+│   ├── code-assist/
+│   ├── small-improvement/
 │   ├── vault-clean/
 │   ├── rho-cloud-email/
 │   ├── rho-cloud-onboard/

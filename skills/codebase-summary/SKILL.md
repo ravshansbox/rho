@@ -1,3 +1,9 @@
+---
+name: codebase-summary
+description: Analyze a repository and generate comprehensive architecture and workflow documentation.
+kind: sop
+---
+
 # Codebase Summary
 
 ## Overview

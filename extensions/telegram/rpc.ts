@@ -12,12 +12,17 @@ import {
   type SlashCommandEntry,
 } from "./slash-contract.ts";
 
-const SLASH_COMMAND_DISCOVERY_TIMEOUT_MS = 1_000;
+const SLASH_COMMAND_DISCOVERY_TIMEOUT_MS = 5_000;
+const SLASH_RPC_ALIASES = new Map<string, string>([
+  ["plan", "skill:pdd"],
+  ["code", "skill:code-assist"],
+]);
 
 interface PendingPrompt {
   resolve: (value: string) => void;
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
+  slashAckTimer: NodeJS.Timeout | null;
   requestId: string;
   inputMessage: string;
   isSlashCommand: boolean;
@@ -76,10 +81,14 @@ function normalizeSlashPromptForRpc(message: string): string {
   if (!parsed.isSlash || !parsed.commandName) return message;
 
   const token = parsed.trimmed.split(/\s+/, 1)[0] ?? "";
-  if (!token.includes("@")) return message;
-
   const rest = parsed.trimmed.slice(token.length);
-  return `/${parsed.commandName}${rest}`;
+  const aliasedCommand = SLASH_RPC_ALIASES.get(parsed.commandName) ?? parsed.commandName;
+
+  if (!token.includes("@") && aliasedCommand === parsed.commandName) {
+    return message;
+  }
+
+  return `/${aliasedCommand}${rest}`;
 }
 
 export class TelegramRpcRunner {
@@ -118,9 +127,10 @@ export class TelegramRpcRunner {
         resolve,
         reject,
         timer,
+        slashAckTimer: null,
         requestId,
-        inputMessage: normalizedMessage,
-        isSlashCommand: parseSlashInput(normalizedMessage).isSlash,
+        inputMessage: message,
+        isSlashCommand: parseSlashInput(message).isSlash,
         sawPromptResponse: false,
         sawAgentEnd: false,
         lastAssistantText: "",
@@ -220,6 +230,10 @@ export class TelegramRpcRunner {
 
   private clearPendingTimers(pending: PendingPrompt): void {
     clearTimeout(pending.timer);
+    if (pending.slashAckTimer) {
+      clearTimeout(pending.slashAckTimer);
+      pending.slashAckTimer = null;
+    }
   }
 
   private resolvePromptText(pending: PendingPrompt): string {
@@ -383,6 +397,15 @@ export class TelegramRpcRunner {
       }
 
       pending.sawPromptResponse = true;
+
+      if (pending.isSlashCommand && !pending.slashAckTimer) {
+        pending.slashAckTimer = setTimeout(() => {
+          const active = session.pending;
+          if (!active || active.requestId !== pending.requestId) return;
+          if (active.lastAssistantText || active.sawAgentEnd) return;
+          this.resolvePending(session, this.resolvePromptText(active));
+        }, 1_500);
+      }
       return;
     }
 

@@ -610,9 +610,15 @@ export function createTelegramWorkerRuntime(options: TelegramWorkerRuntimeOption
     return /rpc prompt timed out/i.test(message);
   };
 
+  const backgroundEligibleSlashCommands = new Set(["plan", "code", "sop"]);
+
   const shouldDeferPromptToBackground = (promptText: string, rawMessage: string): boolean => {
-    if (parseSlashInput(promptText).isSlash) return false;
-    return isPromptTimeoutError(rawMessage);
+    if (!isPromptTimeoutError(rawMessage)) return false;
+
+    const slash = parseSlashInput(promptText);
+    if (!slash.isSlash) return true;
+
+    return backgroundEligibleSlashCommands.has(slash.commandName);
   };
 
   const backgroundDeferAcknowledgement = "⏳ This may take a while. I'll continue in the background and post results here.";

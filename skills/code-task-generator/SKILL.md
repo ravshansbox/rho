@@ -1,3 +1,9 @@
+---
+name: code-task-generator
+description: Generate structured .code-task.md files from rough descriptions or PDD plans.
+kind: sop
+---
+
 # Code Task Generator
 
 ## Overview

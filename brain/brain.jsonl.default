@@ -14,5 +14,5 @@
 {"id":"b0000014","type":"behavior","category":"value","text":"The plan is disposable — regenerate rather than patch failing approaches","created":"DATE_PLACEHOLDER"}
 {"id":"b0000015","type":"behavior","category":"value","text":"Disk is state — files on disk are ground truth","created":"DATE_PLACEHOLDER"}
 {"id":"b0000016","type":"behavior","category":"value","text":"Steer with signals — add signals when things fail specific ways","created":"DATE_PLACEHOLDER"}
-{"id":"rem00001","type":"reminder","text":"Run memory-clean to consolidate memory and decay stale entries","cadence":{"kind":"daily","at":"01:00"},"enabled":true,"created":"DATE_PLACEHOLDER"}
+{"id":"rem00001","type":"reminder","text":"Run memory-consolidate to run a memory sleep cycle (consolidate + mine sessions since last checkpoint)","cadence":{"kind":"daily","at":"01:00"},"enabled":true,"created":"DATE_PLACEHOLDER"}
 {"id":"meta0001","type":"meta","key":"schema_version","value":"1","created":"DATE_PLACEHOLDER"}

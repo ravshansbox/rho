@@ -173,7 +173,7 @@ Share these essentials with the user:
 - `brain action=add type=preference text="..." category=Code` — Add a preference
 - `brain action=add type=task description="..." priority=high` — Add a task
 - `brain action=add type=reminder text="..." cadence={kind:"daily",at:"08:00"}` — Add a reminder
-- `memory-clean` — Run consolidation (decay stale entries, mine sessions for new learnings)
+- `memory-consolidate` — Run consolidation (decay stale entries, mine sessions since last consolidation)
 
 **CLI basics:**
 - `rho` — Start and attach

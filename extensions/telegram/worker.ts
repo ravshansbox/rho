@@ -116,13 +116,22 @@ export function runTelegramWorker(options: TelegramWorkerOptions = {}): void {
     }
   }, refreshMs);
 
+  let cleanedUp = false;
   const cleanup = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
     clearInterval(refreshTimer);
     stopPolling();
     releaseTelegramWorkerLock(lockState);
   };
 
+  const handleSignal = (signal: "SIGINT" | "SIGTERM") => {
+    log(`Telegram worker received ${signal}. Exiting.`);
+    cleanup();
+    process.exit(0);
+  };
+
   process.once("exit", cleanup);
-  process.once("SIGINT", cleanup);
-  process.once("SIGTERM", cleanup);
+  process.once("SIGINT", () => handleSignal("SIGINT"));
+  process.once("SIGTERM", () => handleSignal("SIGTERM"));
 }

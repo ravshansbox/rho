@@ -1,3 +1,9 @@
+---
+name: eval
+description: Plan and run conversational AI agent evaluations with test generation and analysis.
+kind: sop
+---
+
 # EvalKit
 
 ## Overview

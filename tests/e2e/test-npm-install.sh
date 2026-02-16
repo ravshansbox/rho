@@ -89,7 +89,7 @@ bin_field=$(node -e "const p=JSON.parse(require('fs').readFileSync('$pkg_json','
 check_contains "$bin_field" "rho.mjs" "bin.rho → cli/rho.mjs"
 
 # Extensions
-for ext in rho memory-viewer vault-search brave-search x-search email agent-sop usage-bars review; do
+for ext in rho memory-viewer vault-search brave-search x-search email usage-bars review; do
   check_file "$PKG_DIR/extensions/$ext/index.ts" "extension: $ext"
 done
 
@@ -101,8 +101,8 @@ else
   pass "extensions/lib/index.ts absent (correct)"
 fi
 
-# Skills — every registered skill must have a SKILL.md
-for skill in memory-clean vault-clean rho-cloud-email rho-cloud-onboard session-search update-pi; do
+# Skills — every shipped skill must have a SKILL.md
+for skill in auto-memory code-assist code-task-generator codebase-summary create-sop eval memory-consolidate pdd pdd-build rho-cloud-email rho-cloud-onboard session-search small-improvement update-pi vault-clean; do
   check_file "$PKG_DIR/skills/$skill/SKILL.md" "skill: $skill"
 done
 

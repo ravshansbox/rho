@@ -22,7 +22,7 @@ export const REGISTRY: Record<string, ModuleEntry> = {
   heartbeat: {
     category: "core",
     extensions: ["extensions/rho"],
-    skills: ["skills/memory-clean"],
+    skills: ["skills/memory-consolidate", "skills/auto-memory"],
     description: "Heartbeat daemon, check-ins, and memory consolidation",
     alwaysOn: true,
   },
@@ -90,12 +90,21 @@ export const REGISTRY: Record<string, ModuleEntry> = {
     description: "Subagent delegation with chains, parallel execution, and async support",
   },
 
-  // ── Workflows ──────────────────────────────────────────
-  "agent-sop": {
-    category: "tools",
-    extensions: ["extensions/agent-sop"],
-    skills: [],
-    description: "Standard Operating Procedures for structured agent workflows",
+  // ── Workflow Skills (SOP subtype) ─────────────────────
+  workflows: {
+    category: "skills",
+    extensions: [],
+    skills: [
+      "skills/code-assist",
+      "skills/code-task-generator",
+      "skills/codebase-summary",
+      "skills/create-sop",
+      "skills/eval",
+      "skills/pdd",
+      "skills/pdd-build",
+      "skills/small-improvement",
+    ],
+    description: "SOP-style workflow skills executed via /skill run",
   },
 
   // ── UI ────────────────────────────────────────────────

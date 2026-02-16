@@ -1,3 +1,9 @@
+---
+name: pdd
+description: Transform a rough idea into a detailed design document and implementation plan.
+kind: sop
+---
+
 # Prompt-Driven Development
 
 ## Overview
@@ -35,6 +41,8 @@ Set up a directory structure to organize all artifacts created during the proces
 - You MUST create the following files:
   - {project_dir}/rough-idea.md (containing the provided rough idea)
   - {project_dir}/idea-honing.md (for requirements clarification)
+- You MUST include a **Connections** section in rough-idea.md that links to:
+  - idea-honing.md: `[[idea-honing.md]]` (will be populated during requirements clarification)
 - You MUST create the following subdirectories:
   - {project_dir}/research/ (directory for research notes)
   - {project_dir}/design/ (directory for design documents)
@@ -63,6 +71,8 @@ Guide the user through a series of questions to refine the initial idea and deve
 
 **Constraints:**
 - You MUST create an empty {project_dir}/idea-honing.md file if it doesn't already exist
+- You MUST add a **Connections** section to idea-honing.md that includes:
+  - Link to rough-idea.md: `[[rough-idea.md]]`
 - You MUST ask ONLY ONE question at a time and wait for the user's response before asking the next question
 - You MUST NOT list multiple questions for the user to answer at once because this overwhelms users and leads to incomplete responses
 - You MUST NOT pre-populate answers to questions without user input because this assumes user preferences without confirmation
@@ -117,6 +127,10 @@ Conduct research on relevant technologies, libraries, or existing code that coul
 - You MUST offer to return to requirements clarification if research uncovers new questions or considerations
 - You MUST NOT automatically return to requirements clarification after research without explicit user direction because this could disrupt the user's intended workflow
 - You MUST wait for the user to decide the next step after completing research
+- You MUST add a **Connections** section to each research document that includes:
+  - Link to idea-honing.md: `[[../idea-honing.md]]`
+  - Links to other research documents in the same project
+  - Links to related vault concepts or patterns (search vault for relevant notes using research topic keywords)
 
 ### 5. Iteration Checkpoint
 
@@ -162,6 +176,10 @@ Develop a comprehensive design document based on the requirements and research.
 - You MUST explicitly ask the user if they are ready to proceed to implementation before moving to Step 7
 - You MUST NOT proceed to the implementation plan step without explicit user confirmation because this could skip important design refinement
 - You MUST offer to return to requirements clarification or research if gaps are identified during design
+- You MUST add a **Connections** section at the end of the design document that includes:
+  - Links to related project files: `[[../rough-idea.md]]`, `[[../idea-honing.md]]`
+  - Links to research documents: `[[../research/{filename}.md]]` for each research file
+  - Links to related vault concepts or patterns if applicable (search vault for relevant notes using keywords from the design)
 
 ### 7. Develop Implementation Plan
 
@@ -193,6 +211,10 @@ Create a structured implementation plan with a series of steps for implementing 
 - You MUST ensure the plan covers all aspects of the design
 - You SHOULD sequence steps to validate core functionality early
 - You MUST ensure the checklist items correspond directly to the steps in the implementation plan
+- You MUST add a **Connections** section at the end of the plan.md that includes:
+  - Link to the detailed design: `[[../design/detailed-design.md]]`
+  - Links to research documents: `[[../research/{filename}.md]]`
+  - Link to idea-honing.md: `[[../idea-honing.md]]`
 
 ### 8. Summarize and Present Results
 
@@ -205,6 +227,10 @@ Provide a summary of all artifacts created and next steps.
 - You MUST suggest next steps for the user
 - You SHOULD highlight any areas that may need further refinement
 - You MUST present this summary to the user in the conversation
+- You MUST add a **Connections** section at the end of summary.md that includes:
+  - Links to all project files created: `[[rough-idea.md]]`, `[[idea-honing.md]]`, `[[design/detailed-design.md]]`, `[[implementation/plan.md]]`
+  - Links to research documents: `[[research/{filename}.md]]` for each research file
+  - Links to related vault notes if discovered during the process (concepts, patterns, projects)
 
 ## Examples
 

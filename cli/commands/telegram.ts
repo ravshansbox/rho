@@ -4,7 +4,7 @@
 
 import * as path from "node:path";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
 
@@ -28,6 +28,8 @@ import { renderTelegramStatusText } from "../../extensions/telegram/status.ts";
 import { isLeaseStale, readLeaseMeta } from "../../extensions/lib/lease-lock.ts";
 
 const DEFAULT_WORKER_LOCK_STALE_MS = 90_000;
+const ORPHAN_SWEEP_GRACE_MS = 1_200;
+const TELEGRAM_WORKER_PROCESS_MATCH = "cli/telegramd.ts";
 
 interface OnboardOptions {
   token?: string;
@@ -66,6 +68,57 @@ function pidAlive(pid: number): boolean {
   } catch {
     return false;
   }
+}
+
+function listTelegramWorkerPids(): number[] {
+  if (process.platform === "win32") return [];
+
+  try {
+    const result = spawnSync("pgrep", ["-f", TELEGRAM_WORKER_PROCESS_MATCH], {
+      encoding: "utf-8",
+    });
+    const status = result.status ?? 1;
+    if (status !== 0 && status !== 1) return [];
+
+    const stdout = String(result.stdout || "").trim();
+    if (!stdout) return [];
+
+    const parsed = stdout
+      .split(/\s+/)
+      .map((value) => Number.parseInt(value, 10))
+      .filter((pid) => Number.isFinite(pid) && pid > 0 && pid !== process.pid);
+
+    return [...new Set(parsed)];
+  } catch {
+    return [];
+  }
+}
+
+async function reapOrphanTelegramWorkers(keepPid: number | null): Promise<{ attempted: number; remaining: number }> {
+  const candidates = listTelegramWorkerPids().filter((pid) => pid !== keepPid);
+  if (candidates.length === 0) {
+    return { attempted: 0, remaining: 0 };
+  }
+
+  for (const pid of candidates) {
+    try { process.kill(pid, "SIGTERM"); } catch {}
+  }
+
+  const deadline = Date.now() + ORPHAN_SWEEP_GRACE_MS;
+  while (Date.now() < deadline) {
+    if (!candidates.some((pid) => pidAlive(pid))) {
+      return { attempted: candidates.length, remaining: 0 };
+    }
+    await sleep(100);
+  }
+
+  for (const pid of candidates) {
+    if (!pidAlive(pid)) continue;
+    try { process.kill(pid, "SIGKILL"); } catch {}
+  }
+
+  const remaining = candidates.filter((pid) => pidAlive(pid)).length;
+  return { attempted: candidates.length, remaining };
 }
 
 function getWorkerStatus(): { owner: ReturnType<typeof readTelegramWorkerLockOwner>; stale: boolean } {
@@ -331,8 +384,19 @@ async function startWorker(): Promise<void> {
 
   const status = getWorkerStatus();
   if (status.owner && !status.stale) {
+    const sweep = await reapOrphanTelegramWorkers(status.owner.pid);
     console.log(`Telegram worker already running (pid ${status.owner.pid}).`);
+    if (sweep.attempted > 0) {
+      const cleaned = sweep.attempted - sweep.remaining;
+      console.log(`Orphan sweep: cleaned ${cleaned}/${sweep.attempted} extra worker(s).`);
+    }
     return;
+  }
+
+  const preStartSweep = await reapOrphanTelegramWorkers(null);
+  if (preStartSweep.attempted > 0) {
+    const cleaned = preStartSweep.attempted - preStartSweep.remaining;
+    console.log(`Orphan sweep: cleaned ${cleaned}/${preStartSweep.attempted} stale worker(s) before start.`);
   }
 
   const cliDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -381,13 +445,26 @@ async function startWorker(): Promise<void> {
 async function stopWorker(): Promise<void> {
   const status = getWorkerStatus();
   if (!status.owner) {
-    console.log("Telegram worker is not running.");
+    const sweep = await reapOrphanTelegramWorkers(null);
+    if (sweep.attempted === 0) {
+      console.log("Telegram worker is not running.");
+      return;
+    }
+
+    const cleaned = sweep.attempted - sweep.remaining;
+    console.log(`Telegram worker lock missing. Orphan sweep cleaned ${cleaned}/${sweep.attempted} worker(s).`);
     return;
   }
 
   if (status.stale || !pidAlive(status.owner.pid)) {
     try { unlinkSync(TELEGRAM_WORKER_LOCK_PATH); } catch {}
+    const sweep = await reapOrphanTelegramWorkers(null);
+    const cleaned = sweep.attempted - sweep.remaining;
+
     console.log("Removed stale telegram worker lock.");
+    if (sweep.attempted > 0) {
+      console.log(`Orphan sweep: cleaned ${cleaned}/${sweep.attempted} worker(s).`);
+    }
     return;
   }
 
@@ -410,12 +487,27 @@ async function stopWorker(): Promise<void> {
   }
 
   if (!stopped) {
+    const sweep = await reapOrphanTelegramWorkers(null);
+    if (!pidAlive(status.owner.pid)) {
+      const cleaned = sweep.attempted - sweep.remaining;
+      console.log("Telegram worker stopped.");
+      if (sweep.attempted > 0) {
+        console.log(`Orphan sweep: cleaned ${cleaned}/${sweep.attempted} worker(s).`);
+      }
+      return;
+    }
+
     console.error("Telegram worker did not stop in time.");
     process.exitCode = 1;
     return;
   }
 
+  const sweep = await reapOrphanTelegramWorkers(null);
+  const cleaned = sweep.attempted - sweep.remaining;
   console.log("Telegram worker stopped.");
+  if (sweep.attempted > 0) {
+    console.log(`Orphan sweep: cleaned ${cleaned}/${sweep.attempted} worker(s).`);
+  }
 }
 
 async function requestCheck(): Promise<void> {

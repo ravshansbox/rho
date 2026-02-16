@@ -24,10 +24,10 @@ x-search = true                       # X/Twitter search via xAI Grok
 telegram = true                       # Telegram channel adapter (polling-first)
 email = false                         # Agent email via Rho Cloud (rhobot.dev)
 subagents = true                      # Subagent delegation with chains, parallel, and async
-agent-sop = true                      # Standard Operating Procedures for structured agent workflows
 
 # Skills-only modules (no extensions, just SKILL.md files)
 [modules.skills]
+workflows = true                      # SOP-style workflow skills (run via /skill run <name>)
 session-search = true                 # Search across pi session logs
 update-pi = true                      # Update pi coding agent to latest version
 

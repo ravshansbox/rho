@@ -467,7 +467,7 @@ Quick stats and search from the TUI:
 
 ## Memory Maintenance
 
-The **memory-clean** skill consolidates memory when it grows large or noisy. It uses `brain action=decay` to archive stale entries, `brain action=remove` to clean up duplicates, and optionally mines recent sessions for new learnings.
+The **memory-consolidate** skill consolidates memory when it grows large or noisy. It uses `brain action=decay` to archive stale entries, `brain action=remove` to clean up duplicates, mines user sessions since the last consolidation checkpoint, and relocates reference-heavy entries to the vault for ad-hoc search.
 
 ---
 
@@ -475,7 +475,7 @@ The **memory-clean** skill consolidates memory when it grows large or noisy. It 
 
 New installs start with `brain/brain.jsonl.default`, which seeds:
 - 16 behavior entries (do/don't/value directives)
-- 1 reminder (daily memory-clean at 01:00)
+- 1 reminder (daily memory-consolidate at 01:00)
 - 1 meta entry (`schema_version: 1`)
 
 The default file is copied to `~/.rho/brain/brain.jsonl` on first run if the file doesn't exist.

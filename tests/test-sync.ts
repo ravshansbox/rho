@@ -74,7 +74,7 @@ function makeConfig(overrides?: {
     core: { heartbeat: true, memory: true },
     knowledge: { vault: true },
     tools: { "brave-search": true, "x-search": true, email: true },
-    skills: { "session-search": true, "update-pi": true },
+    skills: { workflows: true, "session-search": true, "update-pi": true },
     ui: { "usage-bars": true },
   };
   if (overrides?.modules) {
@@ -178,7 +178,7 @@ console.log("\n-- buildRhoPackageEntry: core modules cannot be disabled --");
     assert(true, "no extensions exclusions (all enabled including core)");
   }
   if (entry.skills) {
-    assertNotIncludes(entry.skills, "!skills/memory-clean", "core memory-clean skill not excluded");
+    assertNotIncludes(entry.skills, "!skills/memory-consolidate", "core memory-consolidate skill not excluded");
   } else {
     assert(true, "no skills exclusions (all enabled including core)");
   }
@@ -195,13 +195,24 @@ console.log("\n-- buildRhoPackageEntry: skills-only module disabled --");
   assertIncludes(entry.skills!, "!skills/session-search", "excludes session-search skill");
 }
 
+console.log("\n-- buildRhoPackageEntry: workflows skill module disabled --");
+{
+  const config = makeConfig({ modules: { skills: { workflows: false } } });
+  const entry = buildRhoPackageEntry(config, RHO_ROOT);
+
+  assert(entry.extensions === undefined, "workflows disable has no extension exclusions");
+  assert(entry.skills !== undefined, "skills array present");
+  assertIncludes(entry.skills!, "!skills/pdd", "excludes pdd skill");
+  assertIncludes(entry.skills!, "!skills/code-assist", "excludes code-assist skill");
+}
+
 console.log("\n-- buildRhoPackageEntry: all non-core modules disabled --");
 {
   const config = makeConfig({
     modules: {
       knowledge: { vault: false },
-      tools: { "brave-search": false, "x-search": false, email: false, "agent-sop": false },
-      skills: { "session-search": false, "update-pi": false },
+      tools: { "brave-search": false, "x-search": false, email: false },
+      skills: { workflows: false, "session-search": false, "update-pi": false },
       ui: { "usage-bars": false },
     },
   });
@@ -211,14 +222,14 @@ console.log("\n-- buildRhoPackageEntry: all non-core modules disabled --");
   assert(entry.extensions !== undefined, "extensions array present");
   assertIncludes(entry.extensions!, "extensions/**/*.ts", "includes extension entrypoints");
 
-  // Count: vault-search, brave-search, x-search, email, agent-sop, usage-bars = 6 exclusions
+  // Count: vault-search, brave-search, x-search, email, usage-bars = 5 exclusions
   const extExclusions = entry.extensions!.filter((p) => p.startsWith("!"));
-  assertEq(extExclusions.length, 6, "6 extension exclusions");
+  assertEq(extExclusions.length, 5, "5 extension exclusions");
 
   assert(entry.skills !== undefined, "skills array present");
-  // Count: vault-clean, rho-cloud-email, rho-cloud-onboard, session-search, update-pi = 5 exclusions
+  // Count: vault-clean, rho-cloud-email, rho-cloud-onboard, workflows(8), session-search, update-pi = 13 exclusions
   const skillExclusions = entry.skills!.filter((p) => p.startsWith("!"));
-  assertEq(skillExclusions.length, 5, "5 skill exclusions");
+  assertEq(skillExclusions.length, 13, "13 skill exclusions");
 }
 
 // ================================================================

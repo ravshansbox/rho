@@ -1,3 +1,9 @@
+---
+name: small-improvement
+description: Run a curiosity-driven explore-and-build loop to ship one useful improvement.
+kind: sop
+---
+
 # Small Improvement
 
 ## Overview
