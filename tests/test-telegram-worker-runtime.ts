@@ -1264,17 +1264,17 @@ try {
     ];
 
     const threadedSent: Array<{ chat_id: number; text: string; other?: any }> = [];
-    const threadedActions: Array<{ chat_id: number; action: string; message_thread_id?: number }> = [];
+    const threadedActions: Array<{ chat_id: number; action: string; other?: any }> = [];
     const threadedClient = {
       async getUpdates() {
         return threadedUpdates;
       },
-      async sendMessage(params: { chat_id: number; text: string; message_thread_id?: number }) {
-        threadedSent.push({ chat_id: params.chat_id, text: params.text, other: params });
-        return { message_id: 1, chat: { id: params.chat_id, type: "private" as const }, date: 1 };
+      async sendMessage(chat_id: number, text: string, other?: any) {
+        threadedSent.push({ chat_id, text, other });
+        return { message_id: 1, chat: { id: chat_id, type: "private" as const }, date: 1 };
       },
-      async sendChatAction(params: { chat_id: number; action: string; message_thread_id?: number }) {
-        threadedActions.push(params);
+      async sendChatAction(chat_id: number, action: string, other?: any) {
+        threadedActions.push({ chat_id, action, other });
         return true;
       },
     };
@@ -1319,7 +1319,7 @@ try {
     assert(threadedResult.accepted === 1, "threaded poll accepts update");
     assert(threadedSent.length === 1, "threaded poll sends reply");
     assert(threadedSent[0]?.other?.message_thread_id === 7, "outbound sendMessage carries message_thread_id");
-    assert(threadedActions.some((a) => a.message_thread_id === 7), "sendChatAction carries message_thread_id");
+    assert(threadedActions.some((a) => a.other?.message_thread_id === 7), "sendChatAction carries message_thread_id");
 
     // Verify session key uses threaded format
     const threadedMap = loadSessionMap(threadedMapPath);
