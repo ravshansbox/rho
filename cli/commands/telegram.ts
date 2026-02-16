@@ -24,6 +24,7 @@ import {
 } from "../../extensions/telegram/pending-approvals.ts";
 import { readTelegramWorkerLockOwner } from "../../extensions/telegram/worker-lock.ts";
 import { getTelegramCheckTriggerState, requestTelegramCheckTrigger } from "../../extensions/telegram/check-trigger.ts";
+import { loadTelegramJobs, summarizeTelegramJobs } from "../../extensions/telegram/jobs.ts";
 import { renderTelegramStatusText } from "../../extensions/telegram/status.ts";
 import { isLeaseStale, readLeaseMeta } from "../../extensions/lib/lease-lock.ts";
 
@@ -156,6 +157,7 @@ function buildStatusText(): string {
   const runtimeAllowedUserIds = operator?.allowedUserIds ?? settings.allowedUserIds;
   const runtime = loadRuntimeState();
   const trigger = getTelegramCheckTriggerState(TELEGRAM_CHECK_TRIGGER_PATH, 0);
+  const jobs = summarizeTelegramJobs(loadTelegramJobs());
   const { owner, stale } = getWorkerStatus();
   const formatted = formatOwner(owner, stale);
 
@@ -180,6 +182,8 @@ function buildStatusText(): string {
     sendFailures: 0,
     pendingInbound: 0,
     pendingOutbound: 0,
+    pendingJobs: jobs.queued,
+    runningJobs: jobs.running,
     allowedChatsText: allowedText(runtimeAllowedChatIds),
     allowedUsersText: allowedText(runtimeAllowedUserIds),
   });

@@ -137,9 +137,20 @@ export function approvePendingByChatId(chatId: number, path = getPendingApproval
 }
 
 export function rejectPendingByPin(pin: string, path = getPendingApprovalsPath()): TelegramPendingApproval | null {
-  return approvePendingByPin(pin, path);
+  const state = loadState(path);
+  const normalizedPin = String(pin || "").trim();
+  const idx = state.requests.findIndex((r) => r.pin === normalizedPin);
+  if (idx < 0) return null;
+  const [request] = state.requests.splice(idx, 1);
+  saveState(state, path);
+  return request;
 }
 
 export function rejectPendingByChatId(chatId: number, path = getPendingApprovalsPath()): TelegramPendingApproval | null {
-  return approvePendingByChatId(chatId, path);
+  const state = loadState(path);
+  const idx = state.requests.findIndex((r) => r.chatId === chatId);
+  if (idx < 0) return null;
+  const [request] = state.requests.splice(idx, 1);
+  saveState(state, path);
+  return request;
 }

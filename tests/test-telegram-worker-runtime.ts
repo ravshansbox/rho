@@ -166,7 +166,7 @@ try {
   const deferRpcRunner = {
     async runPrompt(_sessionFile: string, message: string, timeoutMs?: number) {
       deferCalls.push({ message, timeoutMs });
-      if ((timeoutMs ?? 0) <= 1000) {
+      if ((timeoutMs ?? 0) === 1000) {
         throw new Error("RPC prompt timed out after 1s");
       }
       return "background result";
@@ -196,18 +196,128 @@ try {
   await new Promise((resolve) => setTimeout(resolve, 25));
 
   assert(
-    deferSent.some((item) => item.text.includes("continue in the background")),
-    "defer scenario sends immediate background acknowledgement",
+    deferSent.some((item) => item.text.includes("background job") && item.text.includes("Job ID:")),
+    "defer scenario sends immediate job acknowledgement",
   );
   assert(
-    deferSent.some((item) => item.text.includes("Background task finished") && item.text.includes("background result")),
-    "defer scenario posts background completion",
+    deferSent.some((item) => item.text.includes("Job") && item.text.includes("finished") && item.text.includes("background result")),
+    "defer scenario posts job completion",
   );
-  assert(deferCalls.length === 2, "defer scenario runs foreground attempt then background attempt");
+  assert(deferCalls.length === 2, "defer scenario runs foreground attempt then job attempt");
   assert((deferCalls[0]?.timeoutMs ?? 0) === 1000, "defer scenario foreground timeout uses rpc_prompt_timeout_seconds");
-  assert((deferCalls[1]?.timeoutMs ?? 0) === 5000, "defer scenario background timeout uses background_prompt_timeout_seconds");
-  assert(deferRuntime.getSnapshot().pendingBackground === 0, "defer scenario drains background queue after completion");
+  assert((deferCalls[1]?.timeoutMs ?? -1) === 0, "defer scenario job execution is unbounded (timeout=0)");
+  assert(deferRuntime.getSnapshot().pendingBackground === 0, "defer scenario drains active job queue after completion");
   deferRuntime.dispose();
+
+  console.log("\n-- /cancel and /jobs commands manage job lifecycle --");
+  const jobCmdStatePath = join(tmp, "telegram", "state.jobs-cmd.json");
+  const jobCmdMapPath = join(tmp, "telegram", "session-map.jobs-cmd.json");
+  const jobCmdSessionDir = join(tmp, "sessions-jobs-cmd");
+  const jobCmdJobsPath = join(tmp, "telegram", "jobs.jobs-cmd.json");
+
+  writeFileSync(jobCmdJobsPath, JSON.stringify([
+    {
+      id: "JTEST1",
+      updateId: 901,
+      chatId: 1111,
+      userId: 2222,
+      messageId: 101,
+      sessionKey: "dm:1111",
+      sessionFile: "/tmp/job-session.jsonl",
+      promptText: "long running",
+      createdAtMs: Date.now() - 5_000,
+      startedAtMs: Date.now() - 4_000,
+      finishedAtMs: null,
+      status: "running",
+      completionNotifiedAtMs: null,
+      cancelRequestedAtMs: null,
+    },
+  ], null, 2));
+
+  const jobCmdUpdates: Array<any | null> = [
+    null,
+    {
+      update_id: 901,
+      message: {
+        message_id: 102,
+        from: { id: 2222 },
+        chat: { id: 1111, type: "private" as const },
+        date: 1,
+        text: "/cancel JTEST1",
+      },
+    },
+    {
+      update_id: 902,
+      message: {
+        message_id: 103,
+        from: { id: 2222 },
+        chat: { id: 1111, type: "private" as const },
+        date: 1,
+        text: "/jobs",
+      },
+    },
+  ];
+
+  let jobCmdUpdateCalls = 0;
+  const jobCmdSent: Array<{ chat_id: number; text: string }> = [];
+  let jobCmdCancelCalls = 0;
+
+  const jobCmdClient = {
+    async getUpdates() {
+      const next = jobCmdUpdates[jobCmdUpdateCalls];
+      jobCmdUpdateCalls += 1;
+      return next ? [next] : [];
+    },
+    async sendMessage(chat_id: number, text: string) {
+      jobCmdSent.push({ chat_id, text });
+      return { message_id: 1, chat: { id: chat_id, type: "private" as const }, date: 1 };
+    },
+    async sendChatAction() {
+      return true;
+    },
+  };
+
+  const jobCmdRunner = {
+    async runPrompt() {
+      return await new Promise<string>(() => {
+        // unresolved until cancelled
+      });
+    },
+    cancelSession() {
+      jobCmdCancelCalls += 1;
+      return true;
+    },
+    dispose() {
+      // no-op
+    },
+  };
+
+  const jobCmdRuntime = createTelegramWorkerRuntime({
+    settings,
+    client: jobCmdClient as any,
+    rpcRunner: jobCmdRunner as any,
+    statePath: jobCmdStatePath,
+    mapPath: jobCmdMapPath,
+    sessionDir: jobCmdSessionDir,
+    jobsPath: jobCmdJobsPath,
+    checkTriggerPath: join(tmp, "telegram", "check.trigger.jobs-cmd.json"),
+    operatorConfigPath: join(tmp, "telegram", "config.jobs-cmd.json"),
+    botUsername: "tau_rhobot",
+    logPath: join(tmp, "telegram", "log.jobs-cmd.jsonl"),
+  });
+
+  const warmupResult = await jobCmdRuntime.pollOnce(false);
+  assert(warmupResult.ok === true, "job command warmup poll succeeds");
+
+  const cancelResult = await jobCmdRuntime.pollOnce(false);
+  assert(cancelResult.ok === true, "job command cancel poll succeeds");
+  assert(jobCmdCancelCalls === 1, "/cancel triggers rpc session cancellation for running job");
+  assert(jobCmdSent.some((item) => item.text.includes("Cancelled job JTEST1")), "/cancel replies with cancellation confirmation");
+
+  const jobsResult = await jobCmdRuntime.pollOnce(false);
+  assert(jobsResult.ok === true, "job command list poll succeeds");
+  assert(jobCmdSent.some((item) => item.text.includes("JTEST1") && item.text.includes("cancelled")), "/jobs reports cancelled job state");
+  jobCmdRuntime.dispose();
 
   console.log("\n-- /new resets chat session without calling RPC --");
   const resetStatePath = join(tmp, "telegram", "state.reset.json");

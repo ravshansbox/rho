@@ -18,6 +18,7 @@ import { loadSessionMap } from "./session-map.ts";
 import { renderTelegramOutboundChunks } from "./outbound.ts";
 import { loadOperatorConfig, saveOperatorConfig } from "./operator-config.ts";
 import { getTelegramCheckTriggerState, requestTelegramCheckTrigger } from "./check-trigger.ts";
+import { loadTelegramJobs, summarizeTelegramJobs } from "./jobs.ts";
 import { renderTelegramStatusText, renderTelegramUiStatus } from "./status.ts";
 import { readTelegramWorkerLockOwner } from "./worker-lock.ts";
 import { isLeaseStale, readLeaseMeta } from "../lib/lease-lock.ts";
@@ -162,6 +163,7 @@ export default function (pi: ExtensionAPI) {
     const triggerState = getTelegramCheckTriggerState(TELEGRAM_CHECK_TRIGGER_PATH, 0);
     const { owner, stale } = getWorkerStatus();
     const formatted = formatOwner(owner, stale);
+    const jobs = summarizeTelegramJobs(loadTelegramJobs());
     return renderTelegramStatusText({
       enabled: settings.enabled,
       mode: settings.mode,
@@ -183,6 +185,8 @@ export default function (pi: ExtensionAPI) {
       sendFailures: consecutiveSendFailures,
       pendingInbound: 0,
       pendingOutbound: pendingOutbound.length,
+      pendingJobs: jobs.queued,
+      runningJobs: jobs.running,
       allowedChatsText: runtimeAllowedChatIds.length === 0 ? "all" : runtimeAllowedChatIds.join(","),
       allowedUsersText: runtimeAllowedUserIds.length === 0 ? "all" : runtimeAllowedUserIds.join(","),
     });

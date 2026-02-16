@@ -195,7 +195,7 @@ Troubleshooting:
 - `Missing token env`: export `TELEGRAM_BOT_TOKEN` (or your configured `bot_token_env`)
 - No group replies: mention the bot (or set `require_mention_in_groups = false`)
 - Delivery delays: check `/telegram status` for retry/failure counters
-- Long prompts timing out: tune `rpc_prompt_timeout_seconds` and `background_prompt_timeout_seconds` under `[settings.telegram]` (non-slash prompts auto-defer to background)
+- Long prompts: foreground soft-timeout (`rpc_prompt_timeout_seconds`) now forks work into durable `/jobs` tasks; use `/jobs`, `/job <id>`, `/cancel <id>` to manage long-running work
 
 See full setup and smoke validation guide: [docs/telegram.md](docs/telegram.md).
 

@@ -5,7 +5,7 @@
  * knowledge vault, and heartbeat check-ins.
  *
  * Tools:  memory, tasks, vault, rho_control, rho_subagent
- * Commands: /brain, /tasks, /vault, /rho, /bootstrap
+ * Commands: /brain, /tasks, /vault, /rho, /bootstrap, /status
  * Events: session_start, session_switch, session_fork, session_shutdown,
  *         before_agent_start, agent_end, session_before_compact
  */
@@ -1402,6 +1402,132 @@ export default function (pi: ExtensionAPI) {
     }
   };
 
+  const formatBytes = (bytes: number | null | undefined): string => {
+    if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes < 0) return "n/a";
+    const units = ["B", "KB", "MB", "GB", "TB"];
+    let value = bytes;
+    let idx = 0;
+    while (value >= 1024 && idx < units.length - 1) {
+      value /= 1024;
+      idx += 1;
+    }
+    const digits = value >= 100 ? 0 : value >= 10 ? 1 : 2;
+    return `${value.toFixed(digits)}${units[idx]}`;
+  };
+
+  const formatPercent = (used: number, total: number): string => {
+    if (!Number.isFinite(used) || !Number.isFinite(total) || total <= 0) return "n/a";
+    return `${Math.max(0, Math.min(100, Math.round((used / total) * 100)))}%`;
+  };
+
+  const formatTs = (value: number | null): string => {
+    if (!value || !Number.isFinite(value)) return "never";
+    return new Date(value).toISOString();
+  };
+
+  const formatAge = (value: number | null): string => {
+    if (!value || !Number.isFinite(value)) return "never";
+    const ms = Math.max(0, Date.now() - value);
+    const mins = Math.floor(ms / 60000);
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    return `${days}d ago`;
+  };
+
+  const readDiskStats = (targetPath: string): { total: number; free: number; used: number } | null => {
+    try {
+      const stat = fs.statfsSync(targetPath);
+      const bsize = Number(stat.bsize);
+      const blocks = Number(stat.blocks);
+      const bavail = Number(stat.bavail);
+      if (!Number.isFinite(bsize) || !Number.isFinite(blocks) || bsize <= 0 || blocks <= 0) return null;
+      const total = bsize * blocks;
+      const free = Math.max(0, bsize * (Number.isFinite(bavail) ? bavail : 0));
+      const used = Math.max(0, total - free);
+      return { total, free, used };
+    } catch {
+      return null;
+    }
+  };
+
+  const buildStatusSnapshot = async (ctx: ExtensionContext): Promise<string> => {
+    const cu = ctx.getContextUsage();
+    const contextTokens = typeof cu?.tokens === "number" ? cu.tokens : null;
+    const contextWindow = typeof cu?.contextWindow === "number" ? cu.contextWindow : null;
+    const contextPercent = typeof cu?.percent === "number" ? cu.percent : null;
+
+    const { entries } = readBrain(BRAIN_PATH);
+    const brain = foldBrain(entries);
+    const memoryCount = getMemoryCount();
+    const pendingTasks = brain.tasks.filter((t) => t.status === "pending").length;
+    const activeReminders = brain.reminders.filter((r) => r.enabled).length;
+
+    const vaultStatus = getVaultStatus(VAULT_DIR, vaultGraph);
+
+    let hbModelText: string;
+    if (hbState.heartbeatModel) {
+      hbModelText = `${hbState.heartbeatModel} (pinned)`;
+    } else {
+      const autoResolved = await resolveHeartbeatModel(ctx);
+      if (autoResolved) hbModelText = `${autoResolved.provider}/${autoResolved.model} (auto)`;
+      else if (ctx.model) hbModelText = `${ctx.model.provider}/${ctx.model.id} (session fallback)`;
+      else hbModelText = "auto (no model available)";
+    }
+
+    const leadership = hbIsLeader
+      ? `leader (pid ${process.pid})`
+      : hbLockOwnerPid
+        ? `follower (leader pid ${hbLockOwnerPid})`
+        : "follower";
+
+    const usageText = usageBars
+      ? `5h ${Math.round(usageBars.session)}%, 7d ${Math.round(usageBars.weekly)}%`
+      : "unavailable (run /usage)";
+
+    const totalMem = os.totalmem();
+    const freeMem = os.freemem();
+    const usedMem = Math.max(0, totalMem - freeMem);
+    const procMem = process.memoryUsage();
+    const disk = readDiskStats(RHO_DIR);
+    const load = os.loadavg().map((n) => n.toFixed(2)).join(", ");
+
+    const lines: string[] = [];
+    lines.push("Status:");
+    lines.push(`- Time: ${new Date().toISOString()}`);
+    lines.push("");
+    lines.push("Session:");
+    lines.push(`- Model: ${ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "none"}`);
+    lines.push(`- Context: ${contextTokens ?? "unknown"}/${contextWindow ?? "unknown"} tokens (${contextPercent === null ? "n/a" : `${Math.round(contextPercent)}%`})`);
+    lines.push(`- Usage: ${usageText}`);
+    lines.push("");
+    lines.push("Heartbeat:");
+    lines.push(`- Enabled: ${hbState.enabled}`);
+    lines.push(`- Leadership: ${leadership}`);
+    lines.push(`- Interval: ${formatInterval(hbState.intervalMs)}`);
+    lines.push(`- Model: ${hbModelText}`);
+    lines.push(`- Last check-in: ${formatAge(hbState.lastCheckAt)} (${formatTs(hbState.lastCheckAt)})`);
+    lines.push(`- Next check-in: ${hbState.enabled && hbState.nextCheckAt ? `in ${Math.max(0, Math.ceil((hbState.nextCheckAt - Date.now()) / 60000))}m (${formatTs(hbState.nextCheckAt)})` : "not scheduled"}`);
+    lines.push(`- Check-ins this session: ${hbState.checkCount}`);
+    lines.push("");
+    lines.push("Memory + Vault:");
+    lines.push(`- Memory count: ${memoryCount} (learnings + preferences)`);
+    lines.push(`- Brain: ${pendingTasks} pending tasks, ${activeReminders} active reminders`);
+    lines.push(`- Vault: ${vaultStatus.totalNotes} notes, ${vaultStatus.orphanCount} orphans, ${vaultStatus.inboxItems} inbox`);
+    lines.push("");
+    lines.push("System:");
+    lines.push(`- Host uptime: ${Math.floor(os.uptime() / 3600)}h`);
+    lines.push(`- Load avg (1m,5m,15m): ${load}`);
+    lines.push(`- CPU cores: ${os.cpus().length}`);
+    lines.push(`- Memory: ${formatBytes(usedMem)}/${formatBytes(totalMem)} used (${formatPercent(usedMem, totalMem)})`);
+    lines.push(`- Process RSS/heap: ${formatBytes(procMem.rss)} / ${formatBytes(procMem.heapUsed)}`);
+    lines.push(`- Disk (${RHO_DIR}): ${disk ? `${formatBytes(disk.used)}/${formatBytes(disk.total)} used (${formatPercent(disk.used, disk.total)})` : "n/a"}`);
+
+    return lines.join("\n");
+  };
+
   const setRhoFooter = (ctx: ExtensionContext): void => {
     if (!CUSTOM_FOOTER_ENABLED) return;
     if (!ctx.hasUI) return;
@@ -2680,9 +2806,19 @@ Instructions:
     });
   }
 
-  // ── Command: /rho ──────────────────────────────────────────────────────────
+  // ── Command: /status ───────────────────────────────────────────────────────
 
   if (!IS_SUBAGENT) {
+    pi.registerCommand("status", {
+      description: "Show full runtime status (model, context, usage, heartbeat, memory/vault, system metrics)",
+      handler: async (_args, ctx) => {
+        const text = await buildStatusSnapshot(ctx);
+        ctx.ui.notify(text, "info");
+      },
+    });
+
+    // ── Command: /rho ──────────────────────────────────────────────────────────
+
     pi.registerCommand("rho", {
       description: "Control rho check-in system: status, enable, disable, now, interval <time>, model <auto|provider/model>, automemory <on|off|toggle>",
       handler: async (args, ctx) => {

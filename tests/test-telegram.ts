@@ -797,6 +797,70 @@ try {
     mixedRunner.dispose();
   }
 
+  console.log("\n-- RPC busy prompts retry with followUp queue semantics --");
+  {
+    const promptPayloads: any[] = [];
+    const busyRetrySpawn = ((_cmd: string, _args: string[]) => {
+      const child = new EventEmitter() as any;
+      const stdout = new PassThrough();
+      const stderr = new PassThrough();
+      const stdin: any = {
+        destroyed: false,
+        writable: true,
+        write: (line: string) => {
+          const payload = JSON.parse(String(line).trim());
+          if (payload.type !== "prompt") return true;
+
+          promptPayloads.push(payload);
+          setTimeout(() => {
+            if (!payload.streamingBehavior) {
+              stdout.write(JSON.stringify({
+                type: "response",
+                id: payload.id,
+                command: "prompt",
+                success: false,
+                error: "Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.",
+              }) + "\n");
+              return;
+            }
+
+            stdout.write(JSON.stringify({
+              type: "response",
+              id: payload.id,
+              command: "prompt",
+              success: true,
+            }) + "\n");
+            stdout.write(JSON.stringify({
+              type: "message_end",
+              message: { role: "assistant", content: [{ type: "text", text: "queued ok" }] },
+            }) + "\n");
+            stdout.write(JSON.stringify({ type: "agent_end" }) + "\n");
+          }, 5);
+
+          return true;
+        },
+      };
+      child.stdin = stdin;
+      child.stdout = stdout;
+      child.stderr = stderr;
+      child.kill = () => {
+        child.emit("exit", 0, null);
+        return true;
+      };
+      return child;
+    }) as any;
+
+    const busyRetryRunner = new TelegramRpcRunner(busyRetrySpawn);
+    const queuedResponse = await busyRetryRunner.runPrompt("/tmp/fake-busy-retry-session.jsonl", "long running request", 2000);
+
+    assert(queuedResponse === "queued ok", "busy prompt retry returns assistant output after followUp queue");
+    assert(promptPayloads.length === 2, "busy prompt retry sends initial prompt then one queued followUp retry");
+    assert(!("streamingBehavior" in promptPayloads[0]), "first busy prompt attempt sends immediate prompt semantics");
+    assert(promptPayloads[1]?.streamingBehavior === "followUp", "second busy prompt attempt sets streamingBehavior=followUp");
+
+    busyRetryRunner.dispose();
+  }
+
   console.log("\n-- RPC slash inventory classification --");
   {
     let promptCount = 0;
@@ -871,6 +935,72 @@ try {
     assert(interactiveRejected, "interactive-only slash command is rejected before prompt execution");
     assert(promptCount === 2, "interactive-only slash rejection does not send prompt RPC command");
 
+    let uiNotifiedSlashResult: string | null = null;
+    const uiNotifyRunner = new TelegramRpcRunner((_cmd: string, _args: string[]) => {
+      const child = new EventEmitter() as any;
+      const stdout = new PassThrough();
+      const stderr = new PassThrough();
+      const stdin: any = {
+        destroyed: false,
+        writable: true,
+        write: (line: string) => {
+          const payload = JSON.parse(String(line).trim());
+
+          if (payload.type === "get_commands") {
+            setTimeout(() => {
+              stdout.write(JSON.stringify({
+                type: "response",
+                id: payload.id,
+                command: "get_commands",
+                success: true,
+                data: {
+                  commands: [
+                    { name: "telegram", source: "extension" },
+                  ],
+                },
+              }) + "\n");
+            }, 5);
+            return true;
+          }
+
+          if (payload.type === "prompt") {
+            setTimeout(() => {
+              stdout.write(JSON.stringify({
+                type: "response",
+                id: payload.id,
+                command: "prompt",
+                success: true,
+              }) + "\n");
+              stdout.write(JSON.stringify({
+                type: "extension_ui_request",
+                request: {
+                  method: "notify",
+                  message: "/telegram status executed via extension ui notify",
+                  level: "info",
+                },
+              }) + "\n");
+            }, 5);
+          }
+          return true;
+        },
+      };
+      child.stdin = stdin;
+      child.stdout = stdout;
+      child.stderr = stderr;
+      child.kill = () => {
+        child.emit("exit", 0, null);
+        return true;
+      };
+      return child;
+    }) as any;
+
+    uiNotifiedSlashResult = await uiNotifyRunner.runPrompt("/tmp/fake-inventory-notify-session.jsonl", "/telegram status", 300);
+    assert(
+      uiNotifiedSlashResult === "/telegram status executed via extension ui notify",
+      "extension ui notify events are surfaced as slash command output",
+    );
+
+    uiNotifyRunner.dispose();
     runner.dispose();
   }
 
@@ -1099,6 +1229,50 @@ try {
     assert(lines[1].event === "modern_event", "modern event key preserved");
     assert(lines[0].source === "telegram", "log source is telegram");
     assert(lines[0].schema_version === 1, "log schema version present");
+  }
+
+  console.log("\n-- telegram log rotation --");
+  {
+    const rotatedLogPath = join(tmp, "telegram", "rotate.jsonl");
+
+    const prevMaxBytes = process.env.RHO_TELEGRAM_LOG_MAX_BYTES;
+    const prevMaxFiles = process.env.RHO_TELEGRAM_LOG_MAX_FILES;
+    process.env.RHO_TELEGRAM_LOG_MAX_BYTES = "220";
+    process.env.RHO_TELEGRAM_LOG_MAX_FILES = "3";
+
+    try {
+      for (let i = 0; i < 50; i++) {
+        appendTelegramLog({ event: "rotation_test", sequence: i }, rotatedLogPath);
+      }
+
+      const countLines = (filePath: string): number => {
+        if (!existsSync(filePath)) return 0;
+        const raw = readFileSync(filePath, "utf-8").trim();
+        return raw ? raw.split("\n").filter((line) => line.trim()).length : 0;
+      };
+
+      const totalLines = countLines(rotatedLogPath)
+        + countLines(`${rotatedLogPath}.1`)
+        + countLines(`${rotatedLogPath}.2`)
+        + countLines(`${rotatedLogPath}.3`);
+
+      assert(totalLines < 50, "log rotation retains recent entries and prunes old ones");
+      assert(existsSync(rotatedLogPath), "active telegram log exists");
+      assert(existsSync(`${rotatedLogPath}.1`), "telegram log rotates to .1 archive");
+      assert(!existsSync(`${rotatedLogPath}.4`), "telegram log caps archive count by max files");
+    } finally {
+      if (prevMaxBytes === undefined) {
+        delete process.env.RHO_TELEGRAM_LOG_MAX_BYTES;
+      } else {
+        process.env.RHO_TELEGRAM_LOG_MAX_BYTES = prevMaxBytes;
+      }
+
+      if (prevMaxFiles === undefined) {
+        delete process.env.RHO_TELEGRAM_LOG_MAX_FILES;
+      } else {
+        process.env.RHO_TELEGRAM_LOG_MAX_FILES = prevMaxFiles;
+      }
+    }
   }
 
   console.log("\n-- operator config persistence --");

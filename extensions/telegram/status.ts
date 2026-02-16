@@ -19,6 +19,8 @@ export interface TelegramStatusSnapshot {
   sendFailures: number;
   pendingInbound: number;
   pendingOutbound: number;
+  pendingJobs?: number;
+  runningJobs?: number;
   allowedChatsText: string;
   allowedUsersText: string;
 }
@@ -72,6 +74,8 @@ export function renderTelegramStatusText(snapshot: TelegramStatusSnapshot): stri
     `Send failures: ${snapshot.sendFailures}`,
     `Pending inbound queue: ${snapshot.pendingInbound}`,
     `Pending outbound queue: ${snapshot.pendingOutbound}`,
+    `Pending jobs: ${snapshot.pendingJobs ?? 0}`,
+    `Running jobs: ${snapshot.runningJobs ?? 0}`,
     `Allowed chats: ${snapshot.allowedChatsText}`,
     `Allowed users: ${snapshot.allowedUsersText}`,
   ].join("\n");

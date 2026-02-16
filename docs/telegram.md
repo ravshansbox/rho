@@ -28,7 +28,6 @@ mode = "polling"
 bot_token_env = "TELEGRAM_BOT_TOKEN"
 poll_timeout_seconds = 30
 rpc_prompt_timeout_seconds = 60
-background_prompt_timeout_seconds = 900
 allowed_chat_ids = []
 allowed_user_ids = []
 require_mention_in_groups = true
@@ -112,6 +111,9 @@ Slash command:
 /telegram revoke-chat <chat_id>
 /telegram allow-user <user_id>
 /telegram revoke-user <user_id>
+/jobs
+/job <job_id>
+/cancel <job_id>
 ```
 
 Tool action interface (`telegram` tool):
@@ -124,18 +126,24 @@ Tool action interface (`telegram` tool):
 
 ## Long prompt handling
 
-Telegram keeps a foreground RPC timeout (`rpc_prompt_timeout_seconds`) so one stuck prompt cannot block the queue forever.
+Telegram uses a foreground soft timeout (`rpc_prompt_timeout_seconds`) to detect long-running work without hard-failing it.
 
-If a non-slash prompt hits that timeout, the worker:
+If a prompt hits that timeout, the worker:
 
-1. sends an immediate acknowledgement,
-2. continues the prompt in a durable background queue,
-3. posts the final result in-thread when complete.
+1. forks the work into a durable job (`/jobs`),
+2. rotates the chat onto a fresh main session so follow-up messages stay responsive,
+3. runs the forked job without a hard timeout,
+4. posts final completion/failure back in-thread.
+
+Use:
+
+- `/jobs` to list recent jobs
+- `/job <job_id>` to inspect one job
+- `/cancel <job_id>` to stop a running job
 
 Tune with:
 
 - `rpc_prompt_timeout_seconds` (default `60`)
-- `background_prompt_timeout_seconds` (default `900`)
 
 ## Security model
 
@@ -152,7 +160,8 @@ Tune with:
 - `~/.rho/telegram/config.json` (runtime allow/revoke overrides)
 - `~/.rho/telegram/inbound.queue.json` (durable inbound queue)
 - `~/.rho/telegram/outbound.queue.json` (durable outbound queue)
-- `~/.rho/telegram/background.queue.json` (durable deferred prompt queue)
+- `~/.rho/telegram/jobs.json` (durable job records: queued/running/completed/failed/cancelled)
+- `~/.rho/telegram/background.queue.json` (legacy deferred queue, auto-migrated when present)
 - `~/.rho/telegram/pending-approvals.json` (approval requests)
 
 ## Smoke test
