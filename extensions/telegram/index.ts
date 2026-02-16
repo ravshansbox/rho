@@ -5,7 +5,8 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
-import { TelegramClient, isTelegramParseModeError } from "./api.ts";
+import { Api, isTelegramParseModeError, isRetryableAfterAutoRetry, queueRetryDelayMs, replyParams } from "./api.ts";
+import { autoRetry } from "@grammyjs/auto-retry";
 import {
   loadRuntimeState,
   readTelegramSettings,
@@ -15,7 +16,6 @@ import {
 import { appendTelegramLog } from "./log.ts";
 import { loadSessionMap } from "./session-map.ts";
 import { renderTelegramOutboundChunks } from "./outbound.ts";
-import { retryDelayMs, shouldRetryTelegramError } from "./retry.ts";
 import { loadOperatorConfig, saveOperatorConfig } from "./operator-config.ts";
 import { getTelegramCheckTriggerState, requestTelegramCheckTrigger } from "./check-trigger.ts";
 import { renderTelegramStatusText, renderTelegramUiStatus } from "./status.ts";
@@ -71,7 +71,8 @@ export default function (pi: ExtensionAPI) {
   let consecutiveSendFailures = 0;
   let lastCheckRequestAtMs: number | null = null;
 
-  const client = token.trim() ? new TelegramClient(token.trim()) : null;
+  const client = token.trim() ? new Api(token.trim()) : null;
+  if (client) client.config.use(autoRetry({ maxRetryAttempts: 3, maxDelaySeconds: 30 }));
 
   const persistOperator = () => {
     saveOperatorConfig({
@@ -248,20 +249,16 @@ export default function (pi: ExtensionAPI) {
 
         try {
           try {
-            await client.sendMessage({
-              chat_id: item.chatId,
-              text: chunk.text,
+            await client.sendMessage(item.chatId, chunk.text, {
               parse_mode: chunk.parseMode,
-              disable_web_page_preview: true,
-              reply_to_message_id: i === 0 ? item.replyToMessageId : undefined,
+              link_preview_options: { is_disabled: true },
+              ...replyParams(i === 0 ? item.replyToMessageId : undefined),
             });
           } catch (error) {
             if (chunk.parseMode && isTelegramParseModeError(error)) {
-              await client.sendMessage({
-                chat_id: item.chatId,
-                text: chunk.fallbackText,
-                disable_web_page_preview: true,
-                reply_to_message_id: i === 0 ? item.replyToMessageId : undefined,
+              await client.sendMessage(item.chatId, chunk.fallbackText, {
+                link_preview_options: { is_disabled: true },
+                ...replyParams(i === 0 ? item.replyToMessageId : undefined),
               });
               sentTextPreview = chunk.fallbackText;
               logEvent(
@@ -311,8 +308,8 @@ export default function (pi: ExtensionAPI) {
             },
           );
 
-          if (shouldRetryTelegramError(error, item.attempts)) {
-            const delay = retryDelayMs(error, item.attempts);
+          if (isRetryableAfterAutoRetry(error, item.attempts)) {
+            const delay = queueRetryDelayMs(error, item.attempts);
             deferred.push({
               ...item,
               attempts: item.attempts + 1,

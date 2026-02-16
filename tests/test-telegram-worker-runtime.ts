@@ -3,11 +3,11 @@
  * Run: npx tsx tests/test-telegram-worker-runtime.ts
  */
 
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { TelegramApiError } from "../extensions/telegram/api.ts";
+import { GrammyError, InputFile } from "../extensions/telegram/api.ts";
 import { createTelegramWorkerRuntime } from "../extensions/telegram/worker-runtime.ts";
 import { requestTelegramCheckTrigger } from "../extensions/telegram/check-trigger.ts";
 import { loadRuntimeState, type TelegramSettings } from "../extensions/telegram/lib.ts";
@@ -57,9 +57,9 @@ try {
       getUpdatesCalls++;
       return updates;
     },
-    async sendMessage(params: { chat_id: number; text: string }) {
-      sent.push({ chat_id: params.chat_id, text: params.text });
-      return { message_id: 1, chat: { id: params.chat_id, type: "private" as const }, date: 1 };
+    async sendMessage(chat_id: number, text: string, other?: any) {
+      sent.push({ chat_id, text });
+      return { message_id: 1, chat: { id: chat_id, type: "private" as const }, date: 1 };
     },
     async sendChatAction() {
       return true;
@@ -139,9 +139,9 @@ try {
       deferGetUpdatesCalls++;
       return deferGetUpdatesCalls === 1 ? deferUpdates : [];
     },
-    async sendMessage(params: { chat_id: number; text: string }) {
-      deferSent.push({ chat_id: params.chat_id, text: params.text });
-      return { message_id: 1, chat: { id: params.chat_id, type: "private" as const }, date: 1 };
+    async sendMessage(chat_id: number, text: string, other?: any) {
+      deferSent.push({ chat_id, text });
+      return { message_id: 1, chat: { id: chat_id, type: "private" as const }, date: 1 };
     },
     async sendChatAction() {
       return true;
@@ -220,9 +220,9 @@ try {
     async getUpdates() {
       return resetUpdates;
     },
-    async sendMessage(params: { chat_id: number; text: string }) {
-      resetSent.push({ chat_id: params.chat_id, text: params.text });
-      return { message_id: 1, chat: { id: params.chat_id, type: "private" as const }, date: 1 };
+    async sendMessage(chat_id: number, text: string, other?: any) {
+      resetSent.push({ chat_id, text });
+      return { message_id: 1, chat: { id: chat_id, type: "private" as const }, date: 1 };
     },
     async sendChatAction() {
       return true;
@@ -318,9 +318,9 @@ try {
       shortcutGetUpdatesCalls++;
       return shortcutGetUpdatesCalls === 1 ? shortcutUpdates : [];
     },
-    async sendMessage(params: { chat_id: number; text: string }) {
-      shortcutSent.push({ chat_id: params.chat_id, text: params.text });
-      return { message_id: 1, chat: { id: params.chat_id, type: "private" as const }, date: 1 };
+    async sendMessage(chat_id: number, text: string, other?: any) {
+      shortcutSent.push({ chat_id, text });
+      return { message_id: 1, chat: { id: chat_id, type: "private" as const }, date: 1 };
     },
     async sendChatAction() {
       return true;
@@ -396,7 +396,7 @@ try {
       failingGetUpdatesCalls++;
       throw new Error("simulated poll failure");
     },
-    async sendMessage(_params: { chat_id: number; text: string }) {
+    async sendMessage(_chat_id: number, _text: string, _other?: any) {
       return { message_id: 1, chat: { id: 1, type: "private" as const }, date: 1 };
     },
     async sendChatAction() {
@@ -436,7 +436,7 @@ try {
   assert(persistedFailed.last_check_outcome === "error", "runtime state persists error check outcome");
   assert(persistedFailed.last_check_requester_pid === 9001, "runtime state persists requester pid for failed check");
 
-  console.log("\n-- durable outbound queue persists retry and resumes on restart --");
+  console.log("\n-- retryable send failure (429) keeps outbound item queued --");
   const durableOutboundDir = join(tmp, "telegram-durable-outbound");
   const durableOutboundQueuePath = join(durableOutboundDir, "outbound.queue.json");
   const durableOutboundStatePath = join(durableOutboundDir, "state.json");
@@ -448,15 +448,14 @@ try {
     async getUpdates() {
       return updates;
     },
-    async sendMessage(_params: { chat_id: number; text: string }) {
+    async sendMessage(_chat_id: number, _text: string, _other?: any) {
       retrySendAttempts++;
-      throw new TelegramApiError("rate limited", 429, 0);
+      throw new GrammyError("rate limited", { ok: false, error_code: 429, description: "rate limited", parameters: { retry_after: 0 } }, "sendMessage", {});
     },
     async sendChatAction() {
       return true;
     },
   };
-
   const retryRuntime = createTelegramWorkerRuntime({
     settings,
     client: retryingClient as any,
@@ -469,34 +468,76 @@ try {
     botUsername: "",
     logPath: join(durableOutboundDir, "log.jsonl"),
   });
-
   const retryResult = await retryRuntime.pollOnce(false);
   assert(retryResult.ok === true, "retry scenario poll succeeds");
   assert(retrySendAttempts >= 1, "retry scenario attempts outbound send");
-  assert(retryRuntime.getSnapshot().pendingOutbound === 1, "retry scenario leaves outbound item queued");
+  assert(retryRuntime.getSnapshot().pendingOutbound === 1, "retryable failure keeps outbound item queued");
   assert(existsSync(durableOutboundQueuePath), "retry scenario persists outbound queue file");
 
   const persistedOutboundQueue = existsSync(durableOutboundQueuePath)
     ? JSON.parse(readFileSync(durableOutboundQueuePath, "utf-8")) as any[]
     : [];
   assert(Array.isArray(persistedOutboundQueue) && persistedOutboundQueue.length === 1, "retry scenario persists queued outbound item");
+  assert(persistedOutboundQueue[0].attempts === 1, "retry scenario increments attempt counter");
+  assert(persistedOutboundQueue[0].notBeforeMs > 0, "retry scenario sets backoff delay");
 
   retryRuntime.dispose();
 
-  const resumedOutboundSent: Array<{ chat_id: number; text: string }> = [];
-  const resumedOutboundClient = {
+  console.log("\n-- permanent send failure (400) removes outbound item from queue --");
+  const permFailDir = join(tmp, "telegram-perm-fail");
+  const permFailQueuePath = join(permFailDir, "outbound.queue.json");
+  const permFailStatePath = join(permFailDir, "state.json");
+  const permFailMapPath = join(permFailDir, "session-map.json");
+  const permFailSessionDir = join(tmp, "sessions-perm-fail");
+
+  const permFailClient = {
     async getUpdates() {
-      return [];
+      return updates;
     },
-    async sendMessage(params: { chat_id: number; text: string }) {
-      resumedOutboundSent.push({ chat_id: params.chat_id, text: params.text });
-      return { message_id: 2, chat: { id: params.chat_id, type: "private" as const }, date: 1 };
+    async sendMessage(_chat_id: number, _text: string, _other?: any) {
+      throw new GrammyError("Bad Request", { ok: false, error_code: 400, description: "Bad Request: chat not found" }, "sendMessage", {});
     },
     async sendChatAction() {
       return true;
     },
   };
+  const permFailRuntime = createTelegramWorkerRuntime({
+    settings,
+    client: permFailClient as any,
+    rpcRunner: rpcRunner as any,
+    statePath: permFailStatePath,
+    mapPath: permFailMapPath,
+    sessionDir: permFailSessionDir,
+    checkTriggerPath: join(permFailDir, "check.trigger.json"),
+    operatorConfigPath: join(permFailDir, "config.json"),
+    botUsername: "",
+    logPath: join(permFailDir, "log.jsonl"),
+  });
+  const permFailResult = await permFailRuntime.pollOnce(false);
+  assert(permFailResult.ok === true, "permanent failure scenario poll succeeds");
+  assert(permFailRuntime.getSnapshot().pendingOutbound === 0, "permanent failure removes outbound item from queue");
 
+  permFailRuntime.dispose();
+
+  console.log("\n-- durable outbound queue resumes persisted items on restart --");
+  // Seed the queue file directly to test resume-on-restart
+  mkdirSync(durableOutboundDir, { recursive: true });
+  writeFileSync(durableOutboundQueuePath, JSON.stringify([
+    { chatId: 100, replyToMessageId: 1, text: "persisted msg", attempts: 0, notBeforeMs: 0 },
+  ]));
+  const resumedOutboundSent: Array<{ chat_id: number; text: string }> = [];
+  const resumedOutboundClient = {
+    async getUpdates() {
+      return [];
+    },
+    async sendMessage(chat_id: number, text: string, other?: any) {
+      resumedOutboundSent.push({ chat_id, text });
+      return { message_id: 2, chat: { id: chat_id, type: "private" as const }, date: 1 };
+    },
+    async sendChatAction() {
+      return true;
+    },
+  };
   const resumedOutboundRuntime = createTelegramWorkerRuntime({
     settings,
     client: resumedOutboundClient as any,
@@ -509,16 +550,13 @@ try {
     botUsername: "",
     logPath: join(durableOutboundDir, "log.jsonl"),
   });
-
   const resumedOutboundResult = await resumedOutboundRuntime.pollOnce(false);
   assert(resumedOutboundResult.ok === true, "resumed outbound scenario poll succeeds");
   assert(resumedOutboundSent.length === 1, "resumed outbound scenario flushes persisted queue item");
-
   const drainedOutboundQueue = existsSync(durableOutboundQueuePath)
     ? JSON.parse(readFileSync(durableOutboundQueuePath, "utf-8")) as any[]
     : null;
   assert(Array.isArray(drainedOutboundQueue) && drainedOutboundQueue.length === 0, "resumed outbound scenario drains persisted queue file");
-
   resumedOutboundRuntime.dispose();
 
   console.log("\n-- durable inbound queue resumes persisted work after restart --");
@@ -552,9 +590,9 @@ try {
     async getUpdates() {
       return [];
     },
-    async sendMessage(params: { chat_id: number; text: string }) {
-      resumedInboundSent.push({ chat_id: params.chat_id, text: params.text });
-      return { message_id: 3, chat: { id: params.chat_id, type: "private" as const }, date: 1 };
+    async sendMessage(chat_id: number, text: string, other?: any) {
+      resumedInboundSent.push({ chat_id, text });
+      return { message_id: 3, chat: { id: chat_id, type: "private" as const }, date: 1 };
     },
     async sendChatAction() {
       return true;
@@ -649,9 +687,9 @@ try {
     async getUpdates() {
       return [];
     },
-    async sendMessage(params: { chat_id: number; text: string }) {
-      mediaInboundSent.push({ chat_id: params.chat_id, text: params.text });
-      return { message_id: 4, chat: { id: params.chat_id, type: "private" as const }, date: 1 };
+    async sendMessage(chat_id: number, text: string, other?: any) {
+      mediaInboundSent.push({ chat_id, text });
+      return { message_id: 4, chat: { id: chat_id, type: "private" as const }, date: 1 };
     },
     async sendChatAction() {
       return true;
@@ -725,24 +763,20 @@ try {
     async getUpdates() {
       return sttUpdates;
     },
-    async sendMessage(params: { chat_id: number; text: string }) {
-      sttSent.push({ chat_id: params.chat_id, text: params.text });
-      return { message_id: 5, chat: { id: params.chat_id, type: "private" as const }, date: 1 };
+    async sendMessage(chat_id: number, text: string, other?: any) {
+      sttSent.push({ chat_id, text });
+      return { message_id: 5, chat: { id: chat_id, type: "private" as const }, date: 1 };
     },
-    async sendChatAction(params: { chat_id: number; action: string }) {
-      sttActions.push({ chat_id: params.chat_id, action: params.action });
+    async sendChatAction(chat_id: number, action: string) {
+      sttActions.push({ chat_id, action });
       return true;
     },
-    async getFile(params: { file_id: string }) {
-      sttGetFileCalls.push(params.file_id);
+    async getFile(file_id: string) {
+      sttGetFileCalls.push(file_id);
       return {
-        file_id: params.file_id,
+        file_id,
         file_path: "voice/path-from-telegram.oga",
       };
-    },
-    async downloadFile(filePath: string) {
-      sttDownloadCalls.push(filePath);
-      return new Uint8Array([9, 8, 7]);
     },
   };
 
@@ -766,9 +800,20 @@ try {
     process.env.ELEVENLABS_API_KEY = "test-elevenlabs-key";
 
     globalThis.fetch = (async (url: string, init?: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("/file/bot")) {
+        sttDownloadCalls.push(urlStr);
+        return {
+          ok: true,
+          status: 200,
+          async arrayBuffer() {
+            return new Uint8Array([9, 8, 7]).buffer;
+          },
+        } as any;
+      }
       const headers = (init?.headers ?? {}) as Record<string, string>;
       sttFetchCalls.push({
-        url: String(url),
+        url: urlStr,
         headers,
         body: init?.body instanceof FormData ? init.body : null,
       });
@@ -800,7 +845,7 @@ try {
     assert(sttRpcCalls === 1, "stt scenario treats transcript as prompt and runs rpc once");
     assert(sttRpcPrompts[0] === "voice transcript from ElevenLabs", "stt scenario forwards transcript text to rpc prompt runner");
     assert(sttGetFileCalls.length === 1 && sttGetFileCalls[0] === "voice-file-telegram-1", "stt scenario resolves telegram file metadata from media file id");
-    assert(sttDownloadCalls.length === 1 && sttDownloadCalls[0] === "voice/path-from-telegram.oga", "stt scenario downloads telegram media file for transcription");
+    assert(sttDownloadCalls.length === 1 && sttDownloadCalls[0]?.includes("voice/path-from-telegram.oga"), "stt scenario downloads telegram media file for transcription");
     assert(sttFetchCalls.length === 1 && sttFetchCalls[0]?.url === "https://api.elevenlabs.io/v1/speech-to-text", "stt scenario posts media bytes to ElevenLabs STT endpoint");
     assert(sttFetchCalls[0]?.headers?.["xi-api-key"] === "test-elevenlabs-key", "stt scenario uses ELEVENLABS_API_KEY header for STT request");
 
@@ -833,21 +878,18 @@ try {
     async getUpdates() {
       return sttUpdates;
     },
-    async sendMessage(params: { chat_id: number; text: string }) {
-      sttMissingKeySent.push({ chat_id: params.chat_id, text: params.text });
-      return { message_id: 6, chat: { id: params.chat_id, type: "private" as const }, date: 1 };
+    async sendMessage(chat_id: number, text: string, other?: any) {
+      sttMissingKeySent.push({ chat_id, text });
+      return { message_id: 6, chat: { id: chat_id, type: "private" as const }, date: 1 };
     },
     async sendChatAction() {
       return true;
     },
-    async getFile(_params: { file_id: string }) {
+    async getFile(_file_id: string) {
       return {
         file_id: "voice-file-telegram-1",
         file_path: "voice/path-from-telegram.oga",
       };
-    },
-    async downloadFile(_filePath: string) {
-      return new Uint8Array([9, 8, 7]);
     },
   };
 
@@ -926,22 +968,22 @@ try {
   ];
 
   const ttsSentMessages: Array<{ chat_id: number; text: string }> = [];
-  const ttsSentVoice: Array<{ chat_id: number; reply_to_message_id?: number; voice: unknown }> = [];
+  const ttsSentVoice: Array<{ chat_id: number; reply_message_id?: number; voice: unknown }> = [];
   const ttsActions: Array<{ chat_id: number; action: string }> = [];
   const ttsClient = {
     async getUpdates() {
       return ttsUpdates;
     },
-    async sendMessage(params: { chat_id: number; text: string }) {
-      ttsSentMessages.push({ chat_id: params.chat_id, text: params.text });
-      return { message_id: 7, chat: { id: params.chat_id, type: "private" as const }, date: 1 };
+    async sendMessage(chat_id: number, text: string, other?: any) {
+      ttsSentMessages.push({ chat_id, text });
+      return { message_id: 7, chat: { id: chat_id, type: "private" as const }, date: 1 };
     },
-    async sendVoice(params: { chat_id: number; reply_to_message_id?: number; voice: unknown }) {
-      ttsSentVoice.push(params);
-      return { message_id: 8, chat: { id: params.chat_id, type: "private" as const }, date: 1 };
+    async sendVoice(chat_id: number, voice: unknown, other?: any) {
+      ttsSentVoice.push({ chat_id, voice, reply_message_id: (other?.reply_parameters as any)?.message_id });
+      return { message_id: 8, chat: { id: chat_id, type: "private" as const }, date: 1 };
     },
-    async sendChatAction(params: { chat_id: number; action: string }) {
-      ttsActions.push(params);
+    async sendChatAction(chat_id: number, action: string) {
+      ttsActions.push({ chat_id, action });
       return true;
     },
   };
@@ -999,8 +1041,8 @@ try {
     assert(ttsRequestBody.text === "hello from telegram", "tts scenario sends stripped /tts text payload");
 
     assert(ttsSentVoice.length === 1, "tts scenario sends Telegram voice reply");
-    assert(ttsSentVoice[0]?.reply_to_message_id === 311, "tts scenario replies in-thread to source message");
-    assert(ttsSentVoice[0]?.voice instanceof Uint8Array, "tts scenario sends binary audio payload to Telegram sendVoice");
+    assert(ttsSentVoice[0]?.reply_message_id === 311, "tts scenario replies in-thread to source message");
+    assert(ttsSentVoice[0]?.voice instanceof InputFile, "tts scenario sends InputFile audio payload to Telegram sendVoice");
     assert(ttsSentMessages.length === 0, "tts scenario does not send fallback text when media send succeeds");
     assert(ttsActions.some((action) => action.action === "record_voice"), "tts scenario emits record_voice chat action while synthesizing audio");
     assert(ttsActions.some((action) => action.action === "upload_voice"), "tts scenario emits upload_voice chat action while sending Telegram voice");
@@ -1039,13 +1081,13 @@ try {
     async getUpdates() {
       return ttsMissingKeyUpdates;
     },
-    async sendMessage(params: { chat_id: number; text: string }) {
-      ttsMissingKeySentMessages.push({ chat_id: params.chat_id, text: params.text });
-      return { message_id: 9, chat: { id: params.chat_id, type: "private" as const }, date: 1 };
+    async sendMessage(chat_id: number, text: string, other?: any) {
+      ttsMissingKeySentMessages.push({ chat_id, text });
+      return { message_id: 9, chat: { id: chat_id, type: "private" as const }, date: 1 };
     },
-    async sendVoice(_params: { chat_id: number; voice: unknown }) {
+    async sendVoice(_chat_id: number, _voice: unknown, _other?: any) {
       ttsMissingKeyVoiceSends++;
-      return { message_id: 10, chat: { id: 1111, type: "private" as const }, date: 1 };
+      return { message_id: 10, chat: { id: 1111, type: "private" as const }, date: 1 } as any;
     },
     async sendChatAction() {
       return true;
@@ -1134,13 +1176,13 @@ try {
     async getUpdates() {
       return ttsSendFailureUpdates;
     },
-    async sendMessage(params: { chat_id: number; text: string }) {
-      ttsSendFailureMessages.push({ chat_id: params.chat_id, text: params.text });
-      return { message_id: 11, chat: { id: params.chat_id, type: "private" as const }, date: 1 };
+    async sendMessage(chat_id: number, text: string, other?: any) {
+      ttsSendFailureMessages.push({ chat_id, text });
+      return { message_id: 11, chat: { id: chat_id, type: "private" as const }, date: 1 };
     },
-    async sendVoice(_params: { chat_id: number; voice: unknown }) {
+    async sendVoice(_chat_id: number, _voice: unknown, _other?: any) {
       ttsSendFailureVoiceCalls++;
-      throw new TelegramApiError("Bad Request: voice upload rejected", 400);
+      throw new GrammyError("Bad Request", { ok: false, error_code: 400, description: "Bad Request: voice upload rejected" }, "sendVoice", {});
     },
     async sendChatAction() {
       return true;
