@@ -138,12 +138,12 @@ pkg_version=$(node -e "console.log(JSON.parse(require('fs').readFileSync('$pkg_j
 check_contains "$version_output" "$pkg_version" "version matches package.json ($pkg_version)"
 
 help_output=$(rho --help 2>&1)
-for cmd in init sync doctor upgrade start stop status trigger config logs login web; do
+for cmd in init sync doctor upgrade start stop status trigger config logs login web skills; do
   check_contains "$help_output" "$cmd" "help lists $cmd"
 done
 
 # Every subcommand --help should exit 0 (proves all TS imports resolve via tsx)
-for cmd in init sync doctor upgrade start stop status trigger config logs login web; do
+for cmd in init sync doctor upgrade start stop status trigger config logs login web skills; do
   check "rho $cmd --help" rho "$cmd" --help
 done
 

@@ -92,6 +92,7 @@ rho trigger              # Force an immediate heartbeat check-in
 rho config               # Show current configuration
 rho logs                 # Show recent heartbeat output
 rho upgrade              # Update Rho and sync new modules
+rho skills <args>        # Unified skills CRUD (default provider: vercel)
 ```
 
 Inside a session:
@@ -245,6 +246,40 @@ SOPs are a **skill subtype** (`kind: sop` in frontmatter). Run them with `/skill
 Extensions are TypeScript that runs inside pi's process. They register new tools the LLM can call, hook into lifecycle events, persist state, add commands, and build custom UI. The heartbeat, the brain, and the vault are all extensions.
 
 If the agent can already do it and just needs to know how, write a skill. If you need code running to make it possible, write an extension.
+
+### External skills providers
+
+Rho ships a unified `rho skills` wrapper with provider routing.
+
+Canonical commands:
+- `install`
+- `list`
+- `show`
+- `update`
+- `remove`
+- `search`
+
+Default provider is **vercel**:
+
+```bash
+rho skills install vercel-labs/agent-skills --skill web-design-guidelines
+```
+
+This uses `npx skills` with Pi defaults (`--agent pi --global`) so skills are available under:
+- `~/.pi/agent/skills/` (Pi-visible links)
+- `~/.agents/skills/` (canonical store)
+
+Use **clawhub** when you want registry-based installs like `sonoscli`:
+
+```bash
+rho skills --provider clawhub search sonos
+rho skills --provider clawhub inspect sonoscli --versions
+rho skills --provider clawhub install sonoscli
+```
+
+ClawHub installs directly under:
+- `~/.pi/agent/skills/<slug>`
+- lockfile: `~/.pi/agent/.clawhub/lock.json`
 
 ## Web UI
 
@@ -443,6 +478,7 @@ BRAVE_API_KEY="..."     # For web search (optional)
 ## Links
 
 - [Brain bootstrapping guide](docs/bootstrapping-brain.md)
+- [Skills providers (vercel + clawhub)](docs/skills.md)
 - [Demo walkthrough](docs/demo.md)
 - [iPhone/iPad setup](docs/iphone-setup.md)
 - [VPS setup guide](docs/vps-setup.md)
