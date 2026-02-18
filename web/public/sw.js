@@ -1,29 +1,14 @@
-// Rho PWA Service Worker — network-first with offline fallback
-// Strategy: always try network first so code changes propagate immediately.
-// Cache responses as a fallback for when the server is unreachable.
-const CACHE_NAME = "rho-v1";
+// Rho PWA Service Worker — network-first, no pre-cache
+// Always fetches from the network. Caches responses as offline fallback only.
+// No pre-cache list — avoids stale assets from mismatched versioned URLs.
+const CACHE_NAME = "rho-v2";
 
-// Pre-cache the app shell on install for offline cold-start
-const SHELL_ASSETS = [
-	"/",
-	"/css/style.css",
-	"/js/app.js",
-	"/js/chat.js",
-	"/js/config.js",
-	"/js/memory.js",
-	"/js/slash-contract.js",
-	"/favicon.svg",
-	"/manifest.json",
-];
-
-self.addEventListener("install", (event) => {
-	event.waitUntil(
-		caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_ASSETS)),
-	);
+self.addEventListener("install", () => {
 	self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {
+	// Purge all old caches on activate
 	event.waitUntil(
 		caches
 			.keys()
@@ -37,23 +22,21 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
-	const url = new URL(event.request.url);
-
-	// Skip non-GET, API calls, and WebSocket upgrades
-	if (event.request.method !== "GET" || url.pathname.startsWith("/api/")) {
+	// Skip non-GET, API, and WebSocket
+	if (
+		event.request.method !== "GET" ||
+		new URL(event.request.url).pathname.startsWith("/api/")
+	) {
 		return;
 	}
 
-	// Everything else: network-first, cache as fallback
+	// Network-first, cache as offline fallback
 	event.respondWith(
 		fetch(event.request)
 			.then((response) => {
-				// Only cache successful responses
 				if (response.ok) {
 					const clone = response.clone();
-					caches
-						.open(CACHE_NAME)
-						.then((cache) => cache.put(event.request, clone));
+					caches.open(CACHE_NAME).then((c) => c.put(event.request, clone));
 				}
 				return response;
 			})

@@ -1240,7 +1240,7 @@ app.use(
 	"/css/*",
 	async (c, next) => {
 		await next();
-		c.res.headers.set("Cache-Control", "public, max-age=31536000, immutable");
+		c.res.headers.set("Cache-Control", "public, max-age=300");
 	},
 	serveStatic({ root: publicDir }),
 );
@@ -1248,7 +1248,7 @@ app.use(
 	"/js/*",
 	async (c, next) => {
 		await next();
-		c.res.headers.set("Cache-Control", "public, max-age=31536000, immutable");
+		c.res.headers.set("Cache-Control", "public, max-age=300");
 	},
 	serveStatic({ root: publicDir }),
 );
@@ -1256,7 +1256,7 @@ app.use(
 	"/assets/*",
 	async (c, next) => {
 		await next();
-		c.res.headers.set("Cache-Control", "public, max-age=31536000, immutable");
+		c.res.headers.set("Cache-Control", "public, max-age=300");
 	},
 	serveStatic({ root: publicDir }),
 );
@@ -1264,7 +1264,7 @@ app.use(
 	"/review/css/*",
 	async (c, next) => {
 		await next();
-		c.res.headers.set("Cache-Control", "public, max-age=31536000, immutable");
+		c.res.headers.set("Cache-Control", "public, max-age=300");
 	},
 	serveStatic({ root: publicDir }),
 );
@@ -1272,7 +1272,7 @@ app.use(
 	"/review/js/*",
 	async (c, next) => {
 		await next();
-		c.res.headers.set("Cache-Control", "public, max-age=31536000, immutable");
+		c.res.headers.set("Cache-Control", "public, max-age=300");
 	},
 	serveStatic({ root: publicDir }),
 );
