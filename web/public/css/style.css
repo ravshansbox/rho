@@ -11,7 +11,7 @@
 	--cyan: #5eead4;
 	--yellow: #fbbf24;
 	--red: #ef4444;
-	--mono: "JetBrains Mono", "Cascadia Code", "Fira Code", monospace;
+	--mono: "Iosevka Web", "Iosevka", "JetBrains Mono", "Cascadia Code", "Fira Code", monospace;
 	--nav-height: 2.6rem;
 	--footer-height: 2.2rem;
 	--page-pad: 1.25rem;
@@ -508,7 +508,7 @@ button {
 .chat-session-id {
 	font-size: 0.55rem;
 	color: var(--text-muted);
-	font-family: var(--font-mono);
+	font-family: var(--mono);
 	opacity: 0.4;
 }
 
@@ -1733,26 +1733,30 @@ body.theme-light .chat-text blockquote {
 		font-size: 14px;
 	}
 
-	/* Task 5: Single-row nav on mobile — collapse title, keep tabs inline */
+	/* Nav: single-row, keep chevron on logo, tighten spacing */
 	.nav-inner {
 		flex-wrap: nowrap;
-		padding: 0 0.75rem;
+		padding: 0 0.5rem;
+		min-height: 2.2rem;
 	}
 
-	.nav-title {
-		display: none;
+	.nav-seg {
+		padding: 0 0.6rem;
+		font-size: 0.7rem;
 	}
 
-	.nav-seg::after {
-		display: none;
+	.nav-tab {
+		padding: 0 0.5rem;
+		font-size: 0.65rem;
 	}
 
 	.nav-tabs {
 		margin-left: auto;
+		gap: 0;
 	}
 
 	.main {
-		padding: 0.5rem 0.75rem 0;
+		padding: 0.25rem 0.5rem 0;
 	}
 
 	.view {
@@ -1814,11 +1818,6 @@ body.theme-light .chat-text blockquote {
 	/* Task 3: Safe area insets (composer padding merged above; nav below) */
 	.nav {
 		padding-top: env(safe-area-inset-top);
-	}
-
-	/* Task 8: Proportional font for composer — mono is too wide on 360px screens */
-	.chat-composer-input {
-		font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 	}
 
 	/* Task 6: Touch target spacing — prevent fat-finger misses between adjacent buttons */
@@ -1889,36 +1888,7 @@ body.theme-light .chat-text blockquote {
 }
 
 @media (max-width: 480px) {
-	.nav-tabs {
-		gap: 0.35rem;
-		flex-wrap: nowrap;
-		overflow-x: auto;
-	}
-
-	.nav-tab {
-		flex: 0 0 auto;
-		justify-content: center;
-		border: 1px solid var(--border-bright);
-		border-radius: 3px;
-		padding: 0.4rem 0.65rem;
-		min-height: 36px;
-	}
-
-	.nav-tab::after,
-	.nav-seg::after {
-		display: none;
-	}
-
-	.nav-tab.active {
-		border-color: var(--green);
-		background: var(--green);
-		color: var(--bg);
-	}
-
-	.nav-tab:not(.active):hover {
-		border-color: var(--green-dim);
-		background: var(--bg);
-	}
+	/* nav already handled at 720px */
 }
 
 /* Extension UI - Dialog Overlay */
@@ -2327,19 +2297,7 @@ body.theme-light .chat-text blockquote {
 		--page-pad: 0.5rem;
 	}
 
-	.nav-inner {
-		padding: 0 0.5rem 0.4rem;
-	}
-
-	.nav-seg {
-		padding: 0 0.6rem;
-		font-size: 0.7rem;
-	}
-
-	.nav-tab {
-		padding: 0 0.5rem;
-		font-size: 0.65rem;
-	}
+	/* nav sizing already handled at 720px */
 
 	.main {
 		padding: 0.75rem 0.5rem 1rem;
@@ -3207,4 +3165,34 @@ body.theme-light .chat-text blockquote {
 .load-earlier-btn:hover {
 	background: var(--bg-hover);
 	color: var(--text);
+}
+
+/* ── Pull-to-refresh ─────────────────────────────────────────── */
+
+.ptr-indicator {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.4rem;
+	height: 0;
+	opacity: 0;
+	overflow: hidden;
+	color: var(--text-muted);
+	font-size: 0.75rem;
+	transition: height 0.2s ease, opacity 0.15s ease;
+	flex-shrink: 0;
+}
+
+.ptr-arrow {
+	font-size: 1rem;
+	transition: transform 0.15s ease;
+}
+
+.ptr-spinning {
+	animation: ptr-spin 0.8s linear infinite;
+}
+
+@keyframes ptr-spin {
+	from { transform: rotate(0deg); }
+	to { transform: rotate(360deg); }
 }
