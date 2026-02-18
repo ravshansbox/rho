@@ -4,14 +4,24 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { createNodeWebSocket } from "@hono/node-ws";
+import type { Context } from "hono";
 import { Hono } from "hono";
 import type { WSContext } from "hono/ws";
 import type { WebSocket } from "ws";
 import {
 	appendBrainEntry,
+	type BehaviorEntry,
 	BRAIN_PATH,
+	type BrainEntry,
+	type ContextEntry,
 	foldBrain,
+	type IdentityEntry,
+	type LearningEntry,
+	type PreferenceEntry,
+	type ReminderEntry,
 	readBrain,
+	type TaskEntry,
+	type UserEntry,
 } from "../extensions/lib/brain-store.ts";
 import { getRhoHome } from "./config.ts";
 import {
@@ -96,7 +106,7 @@ function getReviewSession(id: string): ReviewSession | null {
 	return reviewSessions.get(id) ?? null;
 }
 
-function requireReviewToken(c: any, session: ReviewSession): boolean {
+function requireReviewToken(c: Context, session: ReviewSession): boolean {
 	const token = c.req.query("token");
 	return typeof token === "string" && token === session.token;
 }
@@ -438,7 +448,7 @@ app.get(
 				if (typeof event.data !== "string") return;
 				if (role !== "ui") return;
 
-				let msg: any;
+				let msg: { type?: string; comments?: unknown[] };
 				try {
 					msg = JSON.parse(event.data);
 				} catch {
@@ -756,17 +766,22 @@ app.delete("/api/tasks/:id", async (c) => {
 	return c.json({ status: "ok" });
 });
 
+/** Safely access an optional field on a brain entry union. */
+function field(e: BrainEntry, key: string): unknown {
+	return (e as Record<string, unknown>)[key];
+}
+
 // --- Memory API ---
 
 type MemoryEntries = {
-	behaviors: any[];
-	identity: any[];
-	user: any[];
-	learnings: any[];
-	preferences: any[];
-	contexts: any[];
-	tasks: any[];
-	reminders: any[];
+	behaviors: BehaviorEntry[];
+	identity: IdentityEntry[];
+	user: UserEntry[];
+	learnings: LearningEntry[];
+	preferences: PreferenceEntry[];
+	contexts: ContextEntry[];
+	tasks: TaskEntry[];
+	reminders: ReminderEntry[];
 };
 
 let memoryCache: { mtimeMs: number; data: MemoryEntries } | null = null;
@@ -819,7 +834,7 @@ app.get("/api/memory", async (c) => {
 		const categoryFilter = c.req.query("category");
 		const q = c.req.query("q")?.toLowerCase();
 
-		let baseEntries: any[];
+		let baseEntries: BrainEntry[];
 		if (typeFilter) {
 			switch (typeFilter) {
 				case "behavior":
@@ -864,18 +879,20 @@ app.get("/api/memory", async (c) => {
 
 		let filtered = baseEntries;
 		if (categoryFilter)
-			filtered = filtered.filter((e) => (e as any).category === categoryFilter);
+			filtered = filtered.filter(
+				(e) => field(e, "category") === categoryFilter,
+			);
 		if (q)
 			filtered = filtered.filter((e) => {
 				const searchable = [
-					(e as any).text,
-					(e as any).category,
-					(e as any).key,
-					(e as any).value,
-					(e as any).content,
-					(e as any).description,
-					(e as any).path,
-					(e as any).project,
+					field(e, "text"),
+					field(e, "category"),
+					field(e, "key"),
+					field(e, "value"),
+					field(e, "content"),
+					field(e, "description"),
+					field(e, "path"),
+					field(e, "project"),
 				]
 					.filter(Boolean)
 					.join(" ")
@@ -934,10 +951,10 @@ app.put("/api/memory/:id", async (c) => {
 			created: new Date().toISOString(),
 		};
 		if (body.category !== undefined && target.type === "preference") {
-			(updated as any).category = body.category;
+			(updated as Record<string, unknown>).category = body.category;
 		}
 
-		await appendBrainEntry(BRAIN_PATH, updated as any);
+		await appendBrainEntry(BRAIN_PATH, updated as BrainEntry);
 		memoryCache = null;
 		return c.json({ status: "ok", entry: updated });
 	} catch (error) {
@@ -975,7 +992,7 @@ app.post("/api/memory", async (c) => {
 
 		const id = crypto.randomUUID().slice(0, 8);
 		const created = new Date().toISOString();
-		let entry: any;
+		let entry: BrainEntry | undefined;
 
 		switch (entryType) {
 			case "learning":
@@ -1023,6 +1040,7 @@ app.post("/api/memory", async (c) => {
 				);
 		}
 
+		if (!entry) return c.json({ error: "Failed to construct entry" }, 500);
 		await appendBrainEntry(BRAIN_PATH, entry);
 		memoryCache = null;
 		return c.json({ status: "ok", entry });
