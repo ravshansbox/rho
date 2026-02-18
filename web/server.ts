@@ -6,6 +6,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { createNodeWebSocket } from "@hono/node-ws";
 import type { Context } from "hono";
 import { Hono } from "hono";
+import { compress } from "hono/compress";
 import type { WSContext } from "hono/ws";
 import type { WebSocket } from "ws";
 import {
@@ -44,6 +45,18 @@ import {
 } from "./task-api.ts";
 
 const app = new Hono();
+app.use(compress());
+
+// Optional timing middleware when RHO_DEBUG=1
+if (process.env.RHO_DEBUG === "1") {
+	app.use("*", async (c, next) => {
+		const start = Date.now();
+		await next();
+		const duration = Date.now() - start;
+		console.log(`${c.req.method} ${c.req.path} ${duration}ms`);
+	});
+}
+
 const publicDir = path.resolve(
 	path.dirname(new URL(import.meta.url).pathname),
 	"public",
@@ -1199,11 +1212,70 @@ app.get("/", async (c) => {
 	return c.html(html);
 });
 
-app.use("/css/*", serveStatic({ root: publicDir }));
-app.use("/js/*", serveStatic({ root: publicDir }));
-app.use("/assets/*", serveStatic({ root: publicDir }));
-app.use("/review/css/*", serveStatic({ root: publicDir }));
-app.use("/review/js/*", serveStatic({ root: publicDir }));
+// PWA root assets
+app.get(
+	"/manifest.json",
+	serveStatic({ root: publicDir, path: "manifest.json" }),
+);
+app.use("/sw.js", async (c, next) => {
+	await next();
+	// Service workers need no-cache and root scope
+	c.res.headers.set("Cache-Control", "no-cache");
+	c.res.headers.set("Service-Worker-Allowed", "/");
+});
+app.get("/sw.js", serveStatic({ root: publicDir, path: "sw.js" }));
+app.get("/favicon.svg", serveStatic({ root: publicDir, path: "favicon.svg" }));
+app.get(
+	"/icon-192.png",
+	serveStatic({ root: publicDir, path: "icon-192.png" }),
+);
+app.get(
+	"/icon-512.png",
+	serveStatic({ root: publicDir, path: "icon-512.png" }),
+);
+
+// Cache headers for static assets (1 year for versioned assets)
+
+app.use(
+	"/css/*",
+	async (c, next) => {
+		await next();
+		c.res.headers.set("Cache-Control", "public, max-age=31536000, immutable");
+	},
+	serveStatic({ root: publicDir }),
+);
+app.use(
+	"/js/*",
+	async (c, next) => {
+		await next();
+		c.res.headers.set("Cache-Control", "public, max-age=31536000, immutable");
+	},
+	serveStatic({ root: publicDir }),
+);
+app.use(
+	"/assets/*",
+	async (c, next) => {
+		await next();
+		c.res.headers.set("Cache-Control", "public, max-age=31536000, immutable");
+	},
+	serveStatic({ root: publicDir }),
+);
+app.use(
+	"/review/css/*",
+	async (c, next) => {
+		await next();
+		c.res.headers.set("Cache-Control", "public, max-age=31536000, immutable");
+	},
+	serveStatic({ root: publicDir }),
+);
+app.use(
+	"/review/js/*",
+	async (c, next) => {
+		await next();
+		c.res.headers.set("Cache-Control", "public, max-age=31536000, immutable");
+	},
+	serveStatic({ root: publicDir }),
+);
 
 // --- Cleanup ---
 
