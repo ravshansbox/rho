@@ -690,6 +690,9 @@ document.addEventListener("alpine:init", () => {
     userScrolledUp: false,
     _programmaticScroll: false,
 
+    // Image attachments
+    pendingImages: [],
+
     // Chat controls state
     availableModels: [],
     currentModel: null,
@@ -776,6 +779,50 @@ document.addEventListener("alpine:init", () => {
       const el = event.target;
       el.style.height = 'auto';
       el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+    },
+
+    handleComposerPaste(event) {
+      const items = event.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith("image/")) {
+          event.preventDefault();
+          const file = item.getAsFile();
+          if (file) this.addImageFile(file);
+        }
+      }
+    },
+
+    handleImageSelect(event) {
+      const files = event.target.files;
+      if (!files) return;
+      for (const file of files) {
+        if (file.type.startsWith("image/")) {
+          this.addImageFile(file);
+        }
+      }
+      // Reset input so the same file can be re-selected
+      event.target.value = "";
+    },
+
+    addImageFile(file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result;
+        // Extract base64 data (strip "data:image/png;base64," prefix)
+        const base64 = dataUrl.split(",")[1];
+        this.pendingImages.push({
+          dataUrl,
+          data: base64,
+          mimeType: file.type,
+          name: file.name,
+        });
+      };
+      reader.readAsDataURL(file);
+    },
+
+    removeImage(index) {
+      this.pendingImages.splice(index, 1);
     },
 
     handleThreadScroll() {
@@ -1925,7 +1972,8 @@ document.addEventListener("alpine:init", () => {
     },
 
     sendPromptMessage(message, promptOptions = {}, slashClassification = null) {
-      if (!message || !this.activeRpcSessionId || this.isSendingPrompt) {
+      const hasImages = this.pendingImages.length > 0;
+      if ((!message && !hasImages) || !this.activeRpcSessionId || this.isSendingPrompt) {
         return;
       }
 
@@ -1935,13 +1983,27 @@ document.addEventListener("alpine:init", () => {
       this.streamMessageId = "";
       this.pendingSlashClassification = slashClassification;
 
+      // Capture and clear pending images
+      const images = hasImages
+        ? this.pendingImages.map(img => ({ type: "image", data: img.data, mimeType: img.mimeType }))
+        : undefined;
+      const imageDataUrls = hasImages ? this.pendingImages.map(img => img.dataUrl) : [];
+      this.pendingImages = [];
+
       // Add user message locally before sending to RPC
+      const localParts = [];
+      if (message) {
+        localParts.push({ type: "text", render: "text", content: message, key: "text-0" });
+      }
+      imageDataUrls.forEach((dataUrl, i) => {
+        localParts.push({ type: "image", dataUrl, key: `image-${i}` });
+      });
       this.renderedMessages.push({
         id: `local-user-${Date.now()}`,
         role: "user",
         roleLabel: "USER",
         timestamp: new Date().toLocaleString(),
-        parts: [{ type: "text", render: "text", content: message, key: "text-0" }],
+        parts: localParts,
         canFork: true,
       });
       this.scrollThreadToBottom();
@@ -1951,8 +2013,9 @@ document.addEventListener("alpine:init", () => {
         sessionId: this.activeRpcSessionId,
         command: {
           type: "prompt",
-          message,
+          message: message || "Describe this image.",
           ...promptOptions,
+          ...(images ? { images } : {}),
         },
       });
 
@@ -2212,7 +2275,7 @@ document.addEventListener("alpine:init", () => {
 
     handlePromptSubmit() {
       const message = this.promptText.trim();
-      if (!message) {
+      if (!message && this.pendingImages.length === 0) {
         return;
       }
 

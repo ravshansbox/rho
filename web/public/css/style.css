@@ -948,14 +948,79 @@ button { font: inherit; }
   color: var(--red);
 }
 
-.chat-composer {
-  margin-top: 0.25rem;
-  border-top: 1px solid var(--border);
-  padding-top: 0.75rem;
+/* Image attachments in composer */
+.chat-composer-attachments {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding-bottom: 0.5rem;
+}
+
+.chat-attachment-thumb {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.chat-attachment-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.chat-attachment-remove {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: rgba(0, 0, 0, 0.7);
+  color: var(--red);
+  font-size: 0.75rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chat-attachment-remove:hover {
+  background: var(--red);
+  color: var(--bg);
+}
+
+/* Inline images in messages */
+.chat-image {
+  max-width: 300px;
+}
+
+.chat-image img {
+  width: 100%;
+  border: 1px solid var(--border);
+  display: block;
+}
+
+.chat-attach-btn {
+  font-size: 1rem;
+  padding: 0.3rem 0.5rem;
+}
+
+.chat-composer-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 0.75rem;
   align-items: end;
+}
+
+.chat-composer {
+  margin-top: 0.25rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
 }
 
 .chat-composer.streaming {
@@ -1198,7 +1263,6 @@ button { font: inherit; }
   }
 
   .chat-composer {
-    grid-template-columns: 1fr;
     position: sticky;
     bottom: 0;
     background: var(--bg);
@@ -1206,6 +1270,10 @@ button { font: inherit; }
     margin: 0 -0.75rem -0.75rem;
     border-top: 1px solid var(--border);
     z-index: 10;
+  }
+
+  .chat-composer-row {
+    grid-template-columns: 1fr;
   }
 
   /* Touch targets (M4) - 44px minimum for interactive elements */
@@ -1876,7 +1944,7 @@ button { font: inherit; }
   }
 
   /* Composer responsive */
-  .chat-composer {
+  .chat-composer-row {
     grid-template-columns: 1fr;
     gap: 0.5rem;
   }

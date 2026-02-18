@@ -237,6 +237,11 @@
                             <template x-if="part.type === 'text' && part.render === 'text'">
                               <div class="chat-text" x-text="part.content"></div>
                             </template>
+                            <template x-if="part.type === 'image'">
+                              <div class="chat-image">
+                                <img :src="part.dataUrl" alt="attached image" />
+                              </div>
+                            </template>
                             <template x-if="part.type === 'thinking'">
                               <div class="chat-block thinking" x-data="{ open: false }">
                                 <button class="chat-block-toggle" type="button" @click="open = !open">
@@ -347,33 +352,62 @@
                 </div>
 
                 <form class="chat-composer" :class="{ streaming: isStreaming }" @submit.prevent="handlePromptSubmit()" x-show="isForkActive()">
-                  <textarea
-                    class="chat-composer-input"
-                    x-ref="composerInput"
-                    x-model="promptText"
-                    :placeholder="inputPlaceholder()"
-                    rows="2"
-                    :disabled="isSendingPrompt || isForking"
-                    @keydown="handleComposerKeydown($event)"
-                    @input="handleComposerInput($event)"
-                  ></textarea>
-                  <div class="chat-composer-actions">
-                    <button
-                      class="btn btn-ghost"
-                      type="button"
-                      @click="sendFollowUp()"
-                      :disabled="!promptText.trim() || !isStreaming"
-                      x-show="isStreaming"
-                      title="Queue as follow-up (sent after current response)"
-                    >
-                      Follow-up
-                    </button>
-                    <button class="btn" type="submit" :disabled="!promptText.trim() || isSendingPrompt || isForking">
-                      <span x-text="submitButtonLabel()"></span>
-                    </button>
+                  <!-- Image attachments preview -->
+                  <div class="chat-composer-attachments" x-show="pendingImages.length > 0">
+                    <template x-for="(img, idx) in pendingImages" :key="idx">
+                      <div class="chat-attachment-thumb">
+                        <img :src="img.dataUrl" alt="attachment" />
+                        <button class="chat-attachment-remove" type="button" @click="removeImage(idx)">&times;</button>
+                      </div>
+                    </template>
+                  </div>
+                  <div class="chat-composer-row">
+                    <textarea
+                      class="chat-composer-input"
+                      x-ref="composerInput"
+                      x-model="promptText"
+                      :placeholder="inputPlaceholder()"
+                      rows="2"
+                      :disabled="isSendingPrompt || isForking"
+                      @keydown="handleComposerKeydown($event)"
+                      @input="handleComposerInput($event)"
+                      @paste="handleComposerPaste($event)"
+                    ></textarea>
+                    <div class="chat-composer-actions">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        x-ref="imageInput"
+                        style="display: none"
+                        @change="handleImageSelect($event)"
+                      />
+                      <button
+                        class="btn btn-ghost chat-attach-btn"
+                        type="button"
+                        @click="$refs.imageInput.click()"
+                        :disabled="isSendingPrompt || isForking"
+                        title="Attach image"
+                      >
+                        📎
+                      </button>
+                      <button
+                        class="btn btn-ghost"
+                        type="button"
+                        @click="sendFollowUp()"
+                        :disabled="!promptText.trim() || !isStreaming"
+                        x-show="isStreaming"
+                        title="Queue as follow-up (sent after current response)"
+                      >
+                        Follow-up
+                      </button>
+                      <button class="btn" type="submit" :disabled="(!promptText.trim() && pendingImages.length === 0) || isSendingPrompt || isForking">
+                        <span x-text="submitButtonLabel()"></span>
+                      </button>
+                    </div>
                   </div>
                   <div class="chat-composer-hints" x-show="isForkActive()">
-                    Enter to send · Shift+Enter for newline
+                    Enter to send · Shift+Enter for newline · Paste or 📎 to attach images
                   </div>
                 </form>
 
