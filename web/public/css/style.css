@@ -1534,6 +1534,12 @@ button { font: inherit; }
     padding: 0.3rem 0.6rem;
   }
 
+  /* Sessions panel near-full-width on mobile — leave 3rem for backdrop tap-to-close */
+  .chat-sessions {
+    width: calc(100vw - 3rem);
+    max-width: none;
+  }
+
   /* Wider bubbles on mobile */
   .chat-message.assistant {
     width: 92%;
@@ -2011,7 +2017,8 @@ button { font: inherit; }
 
   /* Chat layout single column */
   .chat-sessions {
-    width: 280px;
+    width: calc(100vw - 2.5rem);
+    max-width: none;
   }
 
   .chat-session {
