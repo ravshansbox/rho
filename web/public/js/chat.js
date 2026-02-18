@@ -839,45 +839,10 @@ document.addEventListener("alpine:init", () => {
 		// Queued prompt: message typed during streaming, auto-sent on agent_end
 		queuedPrompt: null,
 
-		// Maximized chat mode
-		chatMaximized: false,
-
-		toggleMaximized() {
-			this.chatMaximized = !this.chatMaximized;
-			document.body.classList.toggle("chat-maximized", this.chatMaximized);
-			if (this.chatMaximized) {
-				localStorage.setItem("rho-maximized", "1");
-			} else {
-				localStorage.removeItem("rho-maximized");
-			}
-		},
-
 		toggleTheme() {
 			this.theme = this.theme === "light" ? "dark" : "light";
 			document.body.classList.toggle("theme-light", this.theme === "light");
 			localStorage.setItem("rho-theme", this.theme);
-		},
-
-		enterMaximized() {
-			if (!this.chatMaximized) {
-				this.chatMaximized = true;
-				document.body.classList.add("chat-maximized");
-				localStorage.setItem("rho-maximized", "1");
-			}
-		},
-
-		exitMaximized() {
-			if (this.chatMaximized) {
-				this.chatMaximized = false;
-				document.body.classList.remove("chat-maximized");
-				localStorage.removeItem("rho-maximized");
-			}
-		},
-
-		handleGlobalKeydown(event) {
-			if (event.key === "Escape" && this.chatMaximized) {
-				this.exitMaximized();
-			}
 		},
 
 		// Auto-scroll state
@@ -937,11 +902,6 @@ document.addEventListener("alpine:init", () => {
 			if (hashId) {
 				this.activeSessionId = hashId;
 			}
-			// Restore maximized state
-			if (localStorage.getItem("rho-maximized") === "1") {
-				this.chatMaximized = true;
-				document.body.classList.add("chat-maximized");
-			}
 			// Setup idle and visibility detection
 			this.setupIdleDetection();
 			this.setupVisibilityDetection();
@@ -967,12 +927,6 @@ document.addEventListener("alpine:init", () => {
 					// Close dialogs first
 					if (this.extensionDialog) {
 						this.dismissDialog(null);
-						e.preventDefault();
-						return;
-					}
-					// Then exit maximized mode
-					if (this.chatMaximized) {
-						this.exitMaximized();
 						e.preventDefault();
 						return;
 					}
@@ -2081,11 +2035,10 @@ document.addEventListener("alpine:init", () => {
 			this.queuedPrompt = null;
 			this.toolCallPartById.clear();
 
-			// Clear stale RPC + exit fullscreen
+			// Clear stale RPC
 			this.activeRpcSessionId = "";
 			this.activeRpcSessionFile = "";
 			this.resetSlashCommandsCache();
-			this.exitMaximized();
 
 			// Clear URL hash
 			if (window.location.hash) {
@@ -2135,11 +2088,6 @@ document.addEventListener("alpine:init", () => {
 				const sessionFile = this.getSessionFile(sessionId);
 				if (sessionFile) {
 					this.startRpcSession(sessionFile);
-					const messageCount =
-						session.stats?.messageCount ?? session.messageCount ?? 0;
-					if (messageCount === 0) {
-						this.enterMaximized();
-					}
 				}
 			} catch (error) {
 				this.error = error.message ?? "Failed to load session";
@@ -2388,7 +2336,6 @@ document.addEventListener("alpine:init", () => {
 				this.applySession(result.session);
 				await this.loadSessions(false);
 				this.startRpcSession(result.sessionFile);
-				this.enterMaximized();
 			} catch (error) {
 				this.error = error.message ?? "Failed to create session";
 				this.isForking = false;
@@ -2428,7 +2375,6 @@ document.addEventListener("alpine:init", () => {
 				this.applySession(forkResult.session);
 				await this.loadSessions(false);
 				this.startRpcSession(forkResult.sessionFile);
-				this.enterMaximized();
 
 				// Reset scroll state and auto-scroll to bottom after fork
 				this.userScrolledUp = false;

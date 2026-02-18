@@ -167,15 +167,6 @@
                   <div class="chat-drop-label">📎 Drop image to attach</div>
                 </div>
 
-                <!-- Maximized top bar (only visible in fullscreen) -->
-                <div class="maximized-bar" x-show="chatMaximized" x-transition.opacity>
-                  <div class="maximized-bar-info">
-                    <span class="maximized-bar-title" x-text="activeSession ? sessionLabel(activeSession) : 'rho'"></span>
-                    <span class="chat-live-badge" x-show="isForkActive()">● LIVE</span>
-                  </div>
-                  <button class="maximized-bar-exit" type="button" @click="toggleMaximized()" title="Exit fullscreen (Esc)">⊡</button>
-                </div>
-
                 <div class="chat-thread-header">
                   <button
                     class="chat-sessions-toggle"
@@ -202,14 +193,6 @@
                     >
                       <span x-show="!isForking">Fork from latest</span>
                       <span x-show="isForking">Forking...</span>
-                    </button>
-                    <button
-                      class="btn btn-sm btn-green"
-                      type="button"
-                      @click="toggleMaximized()"
-                      :title="chatMaximized ? 'Exit fullscreen' : 'Fullscreen chat'"
-                    >
-                      <span x-text="chatMaximized ? '⊡' : '⊞'"></span>
                     </button>
                   </div>
                 </div>
