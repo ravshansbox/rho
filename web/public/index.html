@@ -24,7 +24,7 @@
       rel="stylesheet"
       href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css"
     />
-    <link rel="stylesheet" href="/css/style.css?v=20260218v7" />
+    <link rel="stylesheet" href="/css/style.css?v=20260218v15" />
     <!-- Preload CDN scripts for faster initial render -->
     <link rel="preload" href="https://unpkg.com/htmx.org@1.9.12" as="script" />
     <link rel="preload" href="https://cdn.jsdelivr.net/npm/marked/marked.min.js" as="script" />
@@ -70,7 +70,7 @@
             </button>
             <a
               class="nav-tab"
-              href="/review/lobby.html"
+              href="/review"
               role="tab"
               x-show="activeReviewCount > 0"
               x-cloak
@@ -115,8 +115,7 @@
               ></div>
               <aside class="chat-sessions" :class="{ open: showSessionsPanel }" @keydown.escape.window="showSessionsPanel = false">
                 <div class="chat-section-header">
-                  <div class="chat-section-title">Sessions</div>
-                  <button class="btn btn-sm btn-green" type="button" @click="newSession()" :disabled="isForking">+ New</button>
+                  <div class="chat-section-title">Sessions <span x-show="sessionsTotal > 0" x-text="'(' + sessionsTotal + ')'"></span></div>
                 </div>
                 <div class="chat-section-meta chat-loading-inline" x-show="isLoadingSessions">
                   <span class="loading-spinner-sm"></span>
@@ -170,11 +169,12 @@
                 <div class="chat-thread-header">
                   <button
                     class="chat-sessions-toggle"
+                    :class="{ open: showSessionsPanel }"
                     type="button"
                     @click="showSessionsPanel = !showSessionsPanel"
                     title="Toggle sessions"
                   >
-                    ☰ <span x-text="sessionsTotal + ' sessions'"></span>
+                    <span class="toggle-icon" x-text="showSessionsPanel ? '✕' : '☰'"></span>
                   </button>
                   <div class="chat-thread-info">
                     <div class="chat-thread-title" x-text="activeSession ? sessionLabel(activeSession) : 'Select a session'"></div>
@@ -186,14 +186,20 @@
                   </div>
                   <div class="chat-thread-actions">
                     <button
-                      class="btn btn-sm btn-green"
+                      class="btn btn-sm btn-yellow"
                       type="button"
                       @click="forkFromLatest()"
                       :disabled="!activeSession || !hasForkPoints() || isForking"
                     >
-                      <span x-show="!isForking">Fork from latest</span>
+                      <span x-show="!isForking">Fork</span>
                       <span x-show="isForking">Forking...</span>
                     </button>
+                    <button
+                      class="btn btn-sm btn-green"
+                      type="button"
+                      @click="newSession()"
+                      :disabled="isForking"
+                    >+ New</button>
                   </div>
                 </div>
 

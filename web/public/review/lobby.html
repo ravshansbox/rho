@@ -64,20 +64,27 @@
       overflow: hidden;
     }
 
+    .session-row {
+      display: flex;
+      align-items: center;
+      background: var(--bg-card);
+      transition: background 0.1s;
+    }
+
+    .session-row:hover { background: var(--bg-alt); }
+    .session-row.session--done { opacity: 0.5; }
+    .session-row.session--done:hover { opacity: 0.7; }
+
     .session {
       display: flex;
       align-items: center;
       gap: 16px;
       padding: 14px 16px;
-      background: var(--bg-card);
+      flex: 1;
+      min-width: 0;
       text-decoration: none;
       color: inherit;
-      transition: background 0.1s;
     }
-
-    .session:hover { background: var(--bg-alt); }
-    .session--done { opacity: 0.5; }
-    .session--done:hover { opacity: 0.7; }
 
     .session-status {
       width: 8px;
@@ -159,6 +166,7 @@
       justify-content: center;
       width: 28px;
       height: 28px;
+      margin-right: 12px;
       padding: 0;
       background: none;
       border: 1px solid transparent;
@@ -219,10 +227,11 @@
         const doneClass = s.done ? ' session--done' : '';
 
         const cancelBtn = !s.done
-          ? '<button class="session-cancel" onclick="cancelSession(\'' + escapeHtml(s.id) + '\', \'' + escapeHtml(s.token) + '\', event)" title="Cancel review">✕</button>'
+          ? '<button class="session-cancel" data-id="' + escapeHtml(s.id) + '" data-token="' + escapeHtml(s.token) + '" title="Cancel review">✕</button>'
           : '';
 
-        return '<a class="session' + doneClass + '" href="' + url + '">'
+        return '<div class="session-row' + doneClass + '">'
+          + '<a class="session" href="' + url + '">'
           + '<div class="session-status status--' + status + '"></div>'
           + '<div class="session-info">'
           + '<div class="session-files">' + escapeHtml(fileList) + '</div>'
@@ -233,9 +242,10 @@
           + '</div>'
           + (s.message ? '<div class="session-message">' + escapeHtml(s.message) + '</div>' : '')
           + '</div>'
-          + cancelBtn
           + '<span class="session-badge badge--' + status + '">' + label + '</span>'
-          + '</a>';
+          + '</a>'
+          + cancelBtn
+          + '</div>';
       }).join('') + '</div>';
 
       el.innerHTML = html;
@@ -254,16 +264,21 @@
       } catch {}
     }
 
-    async function cancelSession(id, token, event) {
-      event.preventDefault();
-      event.stopPropagation();
+    document.getElementById('content').addEventListener('click', async function(e) {
+      const btn = e.target.closest('.session-cancel');
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const id = btn.dataset.id;
+      const token = btn.dataset.token;
+      if (!id || !token) return;
       try {
         const res = await fetch('/api/review/sessions/' + encodeURIComponent(id) + '?token=' + encodeURIComponent(token), {
           method: 'DELETE'
         });
         if (res.ok) refresh();
       } catch {}
-    }
+    });
 
     refresh();
     setInterval(refresh, 5000);

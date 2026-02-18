@@ -1,6 +1,6 @@
 // Review UI (served from Rho web server)
 
-function _reviewApp() {
+function reviewApp() {
 	const injected = window.__RHO_REVIEW__ || {};
 	const sessionId = injected.sessionId;
 	const token = injected.token;
