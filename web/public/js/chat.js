@@ -929,11 +929,8 @@ document.addEventListener("alpine:init", () => {
 				const app = this.$root;
 				if (!app || typeof PullToRefresh === "undefined") return;
 				this._ptr = new PullToRefresh(app, {
-					onRefresh: async () => {
-						if (this.activeSessionId) {
-							await this.reloadActiveSession();
-						}
-						await this.loadSessions();
+					onRefresh: () => {
+						window.location.reload();
 					},
 				});
 			});
@@ -2920,6 +2917,12 @@ document.addEventListener("alpine:init", () => {
 				sessionId: this.activeRpcSessionId,
 				command: { type: "abort" },
 			});
+			// Optimistically reset streaming state so UI returns to "Send" mode
+			// immediately. The agent_end event will arrive later to confirm.
+			this.isStreaming = false;
+			this.isSendingPrompt = false;
+			this.queuedPrompt = null;
+			this.updateFooter();
 		},
 
 		sendFollowUp() {
