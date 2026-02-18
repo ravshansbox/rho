@@ -103,6 +103,7 @@ body {
 	line-height: 1.6;
 	-webkit-font-smoothing: antialiased;
 	height: 100vh;
+	height: 100dvh;
 	overflow: hidden;
 	display: flex;
 	flex-direction: column;
@@ -1732,23 +1733,26 @@ body.theme-light .chat-text blockquote {
 		font-size: 14px;
 	}
 
+	/* Task 5: Single-row nav on mobile — collapse title, keep tabs inline */
 	.nav-inner {
-		flex-wrap: wrap;
-		padding: 0 0.75rem 0.5rem;
+		flex-wrap: nowrap;
+		padding: 0 0.75rem;
 	}
 
-	.nav-seg,
-	.nav-tab {
-		margin-bottom: 0.5rem;
+	.nav-title {
+		display: none;
+	}
+
+	.nav-seg::after {
+		display: none;
 	}
 
 	.nav-tabs {
-		width: 100%;
-		margin-left: 0;
+		margin-left: auto;
 	}
 
 	.main {
-		padding: 1rem 0.75rem 1.5rem;
+		padding: 0.5rem 0.75rem 0;
 	}
 
 	.view {
@@ -1756,11 +1760,9 @@ body.theme-light .chat-text blockquote {
 	}
 
 	.chat-composer {
-		position: sticky;
-		bottom: 0;
 		background: var(--bg);
 		padding: 0.5rem 0.75rem;
-		margin: 0 -0.75rem -0.75rem;
+		padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
 		border-top: 1px solid var(--border);
 		z-index: 10;
 	}
@@ -1798,13 +1800,99 @@ body.theme-light .chat-text blockquote {
 	.chat-message.user {
 		width: 88%;
 	}
+
+	/* Task 9: Hide composer hints on mobile */
+	.chat-composer-hints {
+		display: none;
+	}
+
+	/* Task 4: Hide footer on mobile — dev metrics aren't useful on a phone */
+	.footer {
+		display: none;
+	}
+
+	/* Task 3: Safe area insets (composer padding merged above; nav below) */
+	.nav {
+		padding-top: env(safe-area-inset-top);
+	}
+
+	/* Task 8: Proportional font for composer — mono is too wide on 360px screens */
+	.chat-composer-input {
+		font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+	}
+
+	/* Task 6: Touch target spacing — prevent fat-finger misses between adjacent buttons */
+	.chat-thread-actions {
+		gap: 0.75rem;
+	}
+
+	.chat-composer-actions {
+		gap: 0.5rem;
+	}
+
+	.chat-controls-left {
+		gap: 0.75rem;
+	}
+
+	/* Task 7: Center empty state properly when controls area is tall */
+	.chat-empty {
+		flex: 1;
+		justify-content: center;
+	}
+
+	/* Task 2: Simplify thread header — hide low-value metadata */
+	.chat-thread-header {
+		flex-wrap: nowrap;
+		gap: 0.35rem;
+	}
+
+	.chat-thread-meta {
+		display: none;
+	}
+
+	/* Task 1: Compact input area — merge controls into a slim bar above composer */
+	.chat-controls {
+		padding: 0.25rem 0;
+		gap: 0.5rem;
+		border-top: none;
+		margin-top: 0;
+	}
+
+	.chat-controls-left {
+		gap: 0.5rem;
+		flex-wrap: nowrap;
+		overflow-x: auto;
+	}
+
+	.chat-control-label {
+		display: none;
+	}
+
+	.chat-control-select {
+		min-width: 0;
+		max-width: 180px;
+		font-size: 0.7rem;
+		padding: 0.25rem 0.4rem;
+	}
+
+	.chat-control-btn {
+		padding: 0.25rem 0.5rem;
+		font-size: 0.65rem;
+		white-space: nowrap;
+	}
+
+	.chat-composer-actions {
+		flex-direction: row;
+		align-items: center;
+	}
+
 }
 
 @media (max-width: 480px) {
 	.nav-tabs {
-		gap: 0.5rem;
-		flex-wrap: wrap;
-		justify-content: flex-start;
+		gap: 0.35rem;
+		flex-wrap: nowrap;
+		overflow-x: auto;
 	}
 
 	.nav-tab {
@@ -1812,7 +1900,7 @@ body.theme-light .chat-text blockquote {
 		justify-content: center;
 		border: 1px solid var(--border-bright);
 		border-radius: 3px;
-		padding: 0.4rem 0.75rem;
+		padding: 0.4rem 0.65rem;
 		min-height: 36px;
 	}
 
@@ -2420,9 +2508,7 @@ body.theme-light .chat-text blockquote {
 		padding: 0.35rem 0.5rem;
 	}
 
-	.chat-composer-hints {
-		display: none;
-	}
+	/* Moved to 720px breakpoint */
 
 	/* Config responsive */
 	.config-header {
