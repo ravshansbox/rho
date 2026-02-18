@@ -631,6 +631,7 @@ document.addEventListener("alpine:init", () => {
     slashAcItems: [],
     slashAcIndex: 0,
     streamMessageId: "",
+    hasEarlierMessages: false,
     markdownRenderQueue: new Map(),
     markdownTimeout: null,
     toolCallPartById: new Map(),
@@ -652,6 +653,12 @@ document.addEventListener("alpine:init", () => {
       } else {
         localStorage.removeItem("rho-maximized");
       }
+    },
+
+    toggleTheme() {
+      this.theme = this.theme === "light" ? "dark" : "light";
+      document.body.classList.toggle("theme-light", this.theme === "light");
+      localStorage.setItem("rho-theme", this.theme);
     },
 
     enterMaximized() {
@@ -707,8 +714,14 @@ document.addEventListener("alpine:init", () => {
     wsBaseReconnectDelay: 1000,
     isWsConnected: false,
     showReconnectBanner: false,
+    theme: "dark",
 
     async init() {
+      // Load theme preference
+      this.theme = localStorage.getItem("rho-theme") || "dark";
+      if (this.theme === "light") {
+        document.body.classList.add("theme-light");
+      }
       marked.setOptions({
         gfm: true,
         breaks: true,
@@ -1841,7 +1854,7 @@ document.addEventListener("alpine:init", () => {
 
       // Normalize messages, filter empty ones, and deduplicate by ID
       const seenIds = new Set();
-      this.renderedMessages = mergedMessages.map(normalizeMessage).filter((msg) => {
+      const allMessages = mergedMessages.map(normalizeMessage).filter((msg) => {
         // Skip empty messages (no parts or all parts empty)
         if (!msg.parts || msg.parts.length === 0) {
           return false;
@@ -1866,6 +1879,11 @@ document.addEventListener("alpine:init", () => {
         seenIds.add(msg.id);
         return true;
       });
+
+      // Cap to last ~100 messages, track if there are more
+      const MESSAGE_CAP = 100;
+      this.hasEarlierMessages = allMessages.length > MESSAGE_CAP;
+      this.renderedMessages = allMessages.slice(-MESSAGE_CAP);
 
       this.userScrolledUp = false;
       this.$nextTick(() => {
@@ -1900,6 +1918,12 @@ document.addEventListener("alpine:init", () => {
 
     hasMessages() {
       return this.renderedMessages.length > 0;
+    },
+
+    loadEarlierMessages() {
+      // This would require storing the full message list and is a larger change
+      // For now, show a message that full history loading isn't implemented
+      alert("Full message history loading not yet implemented. The session may have more messages.");
     },
 
     latestForkPointId() {

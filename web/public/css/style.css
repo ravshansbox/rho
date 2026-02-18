@@ -17,6 +17,36 @@
   --page-pad: 1.25rem;
 }
 
+/* Light theme */
+body.theme-light {
+  --bg: #ffffff;
+  --bg-alt: #f6f8fa;
+  --border: #d0d7de;
+  --border-bright: #d8dee4;
+  --text: #24292f;
+  --text-muted: #57606a;
+  --text-dim: #8b949e;
+  --green: #1a7f37;
+  --green-dim: #2da44e;
+  --cyan: #0a3069;
+  --yellow: #9a6700;
+  --red: #cf222e;
+  background-image:
+    linear-gradient(rgba(0,0,0,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,0,0,0.03) 1px, transparent 1px);
+}
+
+body.theme-light .nav,
+body.theme-light .footer,
+body.theme-light .panel {
+  background: var(--bg-alt);
+}
+
+body.theme-light ::selection {
+  background: var(--green);
+  color: #fff;
+}
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 /* Custom scrollbar styling (S1, S2) */
@@ -2843,3 +2873,22 @@ body.chat-maximized .chat-thread-body {
   flex: 1;
   overflow-y: auto;
 }
+
+
+.load-earlier-btn {
+  display: block;
+  margin: 0.5rem auto;
+  padding: 0.5rem 1rem;
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+.load-earlier-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
