@@ -1771,8 +1771,10 @@ document.addEventListener("alpine:init", () => {
           return true;
         });
 
+      this.userScrolledUp = false;
       this.$nextTick(() => {
         highlightCodeBlocks(this.$refs.thread);
+        this.scrollThreadToBottom();
       });
     },
 
