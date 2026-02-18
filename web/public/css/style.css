@@ -1778,6 +1778,26 @@ body.theme-light .chat-text blockquote {
 		z-index: 10;
 	}
 
+	/* Stack composer: full-width textarea, buttons below */
+	.chat-composer-row {
+		grid-template-columns: 1fr;
+		gap: 0.35rem;
+	}
+
+	.chat-composer-input {
+		width: 100%;
+		min-height: 2.5rem;
+		max-height: 8rem;
+		font-size: 14px;
+	}
+
+	.chat-composer-actions {
+		flex-direction: row;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 0.5rem;
+	}
+
 	/* Touch targets (M4) - 44px minimum for interactive elements */
 	.btn,
 	.nav-tab,
@@ -1812,14 +1832,23 @@ body.theme-light .chat-text blockquote {
 		width: 100%;
 	}
 
-	/* Tighter message padding */
+	/* Tighter message padding + smaller text */
 	.chat-message {
 		padding: 0.5rem 0.6rem;
 	}
 
+	.chat-text {
+		font-size: 0.78rem;
+	}
+
+	.chat-usage {
+		font-size: 0.58rem;
+	}
+
 	/* Compact message meta — inline role + time */
 	.chat-message-meta {
-		margin-bottom: 0.3rem;
+		margin-bottom: 0.25rem;
+		font-size: 0.58rem;
 	}
 
 	/* Hide composer hints on mobile */
@@ -2456,25 +2485,22 @@ body.theme-light .chat-text blockquote {
 		white-space: nowrap;
 	}
 
-	/* Composer responsive — keep textarea + actions side-by-side */
+	/* Tightest composer padding at 400px */
 	.chat-composer {
-		padding-top: 0.4rem;
+		padding: 0.3rem 0.35rem;
+		padding-bottom: max(0.25rem, env(safe-area-inset-bottom));
 	}
 
-	.chat-composer-row {
-		grid-template-columns: minmax(0, 1fr) auto;
-		gap: 0.4rem;
-	}
-
-	.chat-composer-actions {
-		flex-direction: row;
-		flex-wrap: wrap;
-		gap: 0.25rem;
+	.chat-composer-input {
+		min-height: 2.2rem;
+		max-height: 6rem;
+		font-size: 14px;
+		padding: 0.3rem 0.4rem;
 	}
 
 	.chat-composer-actions .btn {
 		padding: 0.25rem 0.5rem;
-		font-size: 0.65rem;
+		font-size: 0.6rem;
 		min-height: 32px;
 	}
 
@@ -2484,21 +2510,9 @@ body.theme-light .chat-text blockquote {
 		min-height: 32px;
 	}
 
-	.chat-composer-input {
-		min-height: 2rem;
-		max-height: 4.5rem;
-		font-size: 16px; /* prevents iOS zoom on focus */
-		padding: 0.3rem 0.4rem;
-	}
-
-	/* Tightest composer padding */
-	.chat-composer {
-		padding-top: 0.3rem;
-		padding-bottom: max(0.25rem, env(safe-area-inset-bottom));
-	}
-
-	.chat-composer-row {
-		gap: 0.3rem;
+	/* Even smaller message text */
+	.chat-text {
+		font-size: 0.72rem;
 	}
 
 	/* Config responsive */
