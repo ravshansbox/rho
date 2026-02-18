@@ -2396,7 +2396,8 @@ body.theme-light .chat-text blockquote {
 	}
 
 	.chat-composer-actions {
-		flex-direction: column;
+		flex-direction: row;
+		flex-wrap: wrap;
 		gap: 0.25rem;
 	}
 
@@ -2409,6 +2410,7 @@ body.theme-light .chat-text blockquote {
 	.chat-attach-btn {
 		padding: 0.2rem 0.4rem;
 		font-size: 0.85rem;
+		min-height: 32px;
 	}
 
 	.chat-composer-input {
