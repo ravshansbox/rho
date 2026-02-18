@@ -567,7 +567,6 @@ button { font: inherit; }
   background: var(--bg-alt);
   padding: 0.75rem 1rem;
   border-radius: 6px;
-  max-width: 85%;
 }
 
 .chat-message.user {
@@ -588,8 +587,8 @@ button { font: inherit; }
 
 .chat-message.assistant {
   align-self: flex-start;
+  width: 80%;
   border-color: rgba(94, 234, 212, 0.2);
-  min-width: 40%;
 }
 
 .chat-message.summary {
@@ -1206,8 +1205,8 @@ button { font: inherit; }
   }
 
   /* Wider bubbles on mobile */
-  .chat-message {
-    max-width: 92%;
+  .chat-message.assistant {
+    width: 92%;
   }
 
   .chat-message.user {
