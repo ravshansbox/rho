@@ -2735,13 +2735,25 @@ document.addEventListener("alpine:init", () => {
 		},
 
 		handleSessionStatsUpdate(stats) {
+			// stats.tokens may be an object { input, output, cacheRead, cacheWrite, total }
+			// (pi SessionStats format) or a plain number (legacy)
+			const tok = stats.tokens;
+			const tokIsObj = tok && typeof tok === "object";
 			this.sessionStats = {
-				tokens: stats.totalTokens ?? stats.tokens ?? 0,
+				tokens: stats.totalTokens ?? (tokIsObj ? tok.total : tok) ?? 0,
 				cost: stats.totalCost ?? stats.cost ?? 0,
-				inputTokens: stats.inputTokens ?? 0,
-				outputTokens: stats.outputTokens ?? 0,
-				cacheRead: stats.cacheRead ?? stats.cacheReadTokens ?? 0,
-				cacheWrite: stats.cacheWrite ?? stats.cacheCreation ?? 0,
+				inputTokens: stats.inputTokens ?? (tokIsObj ? tok.input : 0) ?? 0,
+				outputTokens: stats.outputTokens ?? (tokIsObj ? tok.output : 0) ?? 0,
+				cacheRead:
+					stats.cacheRead ??
+					stats.cacheReadTokens ??
+					(tokIsObj ? tok.cacheRead : 0) ??
+					0,
+				cacheWrite:
+					stats.cacheWrite ??
+					stats.cacheCreation ??
+					(tokIsObj ? tok.cacheWrite : 0) ??
+					0,
 			};
 			this.updateFooter();
 		},
