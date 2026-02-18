@@ -851,6 +851,12 @@ button { font: inherit; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.tool-diff-badge { margin-left: 0.5rem; }
+.diff-stats { margin-left: 0.5rem; font-size: 0.7rem; }
+.diff-add { color: var(--green); }
+.diff-remove { color: var(--red); }
+.diff-hunk { color: var(--blue); }
+.diff-content { margin: 0.5rem 0; }
 
 /* Thinking block styles */
 .thinking-icon { margin-right: 0.35rem; }

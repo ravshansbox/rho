@@ -294,20 +294,34 @@
                               </div>
                             </template>
                             <template x-if="part.type === 'tool_call'">
-                              <div class="chat-block tool" x-data="{ open: false }">
+                              <div class="chat-block tool" x-data="{ open: false, showDiff: false }">
                                 <button class="chat-block-toggle" type="button" @click="open = !open">
                                   <span class="tool-status-icon" :class="part.status" x-text="part.status === 'running' ? '⟳' : part.status === 'error' ? '✗' : '✓'"></span>
                                   <span class="tool-name" x-text="part.name"></span>
                                   <span class="tool-args-hint" x-text="part.argsSummary"></span>
                                   <span class="tool-duration" x-show="part.duration" x-text="part.duration"></span>
+                                  <span class="tool-diff-badge" x-show="part.diffInfo && part.diffInfo.hasDiff" @click.stop="showDiff = !showDiff" title="Toggle diff view" style="cursor:pointer;margin-left:0.5rem;padding:0.1rem 0.3rem;background:var(--bg-hover);border-radius:3px;font-size:0.6rem;color:var(--text-dim)" x-text="showDiff ? '📄' : '📋'"></span>
                                   <span class="tool-chevron" x-text="open ? '▾' : '▸'"></span>
                                 </button>
                                 <div class="tool-preview" x-show="!open && part.outputPreview" x-text="part.outputPreview"></div>
                                 <div class="chat-block-body" x-show="open">
                                   <div class="chat-block-label">args</div>
                                   <pre><code x-text="part.args"></code></pre>
-                                  <div class="chat-block-label" x-show="part.output">output</div>
-                                  <pre x-show="part.output"><code x-text="part.output"></code></pre>
+                                  <!-- Diff view for edit/write tools -->
+                                  <template x-if="part.diffInfo && part.diffInfo.hasDiff && showDiff">
+                                    <div class="tool-diff-view">
+                                      <div class="chat-block-label">
+                                        <span x-text="part.diffInfo.filePath || 'diff'"></span>
+                                        <span class="diff-stats" x-show="part.diffInfo.linesAdded || part.diffInfo.linesRemoved">
+                                          <span style="color:var(--green)" x-text="'+' + part.diffInfo.linesAdded"></span>
+                                          <span style="color:var(--red)" x-text="'-' + part.diffInfo.linesRemoved"></span>
+                                        </span>
+                                      </div>
+                                      <pre class="diff-content" style="background:var(--bg-secondary);padding:0.5rem;overflow-x:auto;border-radius:4px;font-size:0.75rem;line-height:1.4"><code><template x-for="line in part.diffInfo.diffLines"><span :class="line.startsWith('+') ? 'diff-add' : line.startsWith('-') ? 'diff-remove' : line.startsWith('@@') ? 'diff-hunk' : ''" x-text="line + '\n'" style="display:block;white-space:pre"></template></code></pre>
+                                    </div>
+                                  </template>
+                                  <div class="chat-block-label" x-show="part.output && (!part.diffInfo || !part.diffInfo.hasDiff || !showDiff)">output</div>
+                                  <pre x-show="part.output && (!part.diffInfo || !part.diffInfo.hasDiff || !showDiff)"><code x-text="part.output"></code></pre>
                                 </div>
                               </div>
                             </template>

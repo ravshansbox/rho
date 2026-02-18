@@ -41,6 +41,64 @@ function generateOutputPreview(output, maxLen = 80) {
   return oneLine.length > maxLen ? `${oneLine.substring(0, maxLen)}...` : oneLine;
 }
 
+// Detect if a tool is an edit or write tool
+function isFileEditTool(toolName) {
+  if (!toolName) return false;
+  const name = toolName.toLowerCase();
+  return name === "edit" || name === "write" || name === "str_replace_browser" || name === "multi-edit" || name === "multi_edit";
+}
+
+// Parse edit/write tool output to extract diff information
+function parseToolOutput(output, toolName) {
+  if (!output || !isFileEditTool(toolName)) {
+    return null;
+  }
+
+  const result = {
+    hasDiff: false,
+    filePath: null,
+    linesAdded: 0,
+    linesRemoved: 0,
+    diffLines: [],
+  };
+
+  // Try to extract file path from output
+  const fileMatch = output.match(/[Ee]dited\s+(\d+)\s+lines?\s+(?:at|in|of)\s+[`"']?([^`"'\n]+)[`"']?/);
+  const writeMatch = output.match(/[Ww]rote\s+(\d+)\s+bytes?\s+to\s+[`"']?([^`"'\n]+)[`"']?/);
+  const pathMatch = output.match(/([~\/]?[\w\-.\/]+\.[a-zA-Z0-9]+)/);
+
+  if (fileMatch) {
+    result.filePath = fileMatch[2];
+  } else if (writeMatch) {
+    result.filePath = writeMatch[2];
+  } else if (pathMatch) {
+    result.filePath = pathMatch[1];
+  }
+
+  // Try to extract line counts
+  const addedMatch = output.match(/(\d+)\s+lines?\s+added/);
+  const removedMatch = output.match(/(\d+)\s+lines?\s+removed/);
+  const diffMatch = output.match(/[+-]\d+/g);
+
+  if (addedMatch) result.linesAdded = parseInt(addedMatch[1], 10);
+  if (removedMatch) result.linesRemoved = parseInt(removedMatch[1], 10);
+
+  // Look for diff-like lines (+line, -line)
+  const diffLines = output.split("\n").filter((line) => line.startsWith("+") || line.startsWith("-") || line.startsWith("@@"));
+
+  if (diffLines.length > 0) {
+    result.hasDiff = true;
+    result.diffLines = diffLines.slice(0, 50); // Limit to 50 lines
+  }
+
+  // If we found file path or diff, return the result
+  if (result.filePath || result.hasDiff) {
+    return result;
+  }
+
+  return null;
+}
+
 function extractText(content) {
   if (content == null) {
     return "";
@@ -454,6 +512,8 @@ function normalizeMessage(message) {
     if (part.type === "tool_call") {
       const args = typeof part.args === "string" ? part.args : safeString(part.args ?? "");
       const output = typeof part.output === "string" ? part.output : safeString(part.output ?? "");
+      const toolName = part.name ?? "";
+      const parsedOutput = parseToolOutput(output, toolName);
       return {
         ...part,
         key: `${message.id}-tool-${index}`,
@@ -463,6 +523,8 @@ function normalizeMessage(message) {
         outputPreview: part.outputPreview ?? generateOutputPreview(output),
         status: part.status ?? "done",
         duration: part.duration ?? "",
+        isFileEdit: isFileEditTool(toolName),
+        diffInfo: parsedOutput,
       };
     }
     if (part.type === "bash") {
@@ -632,6 +694,7 @@ document.addEventListener("alpine:init", () => {
     slashAcIndex: 0,
     streamMessageId: "",
     hasEarlierMessages: false,
+    allNormalizedMessages: [],
     markdownRenderQueue: new Map(),
     markdownTimeout: null,
     toolCallPartById: new Map(),
@@ -1743,6 +1806,7 @@ document.addEventListener("alpine:init", () => {
       this.activeSessionId = "";
       this.activeSession = null;
       this.renderedMessages = [];
+      this.allNormalizedMessages = [];
       this.streamMessageId = "";
       this.error = "";
       this.isLoadingSession = false;
@@ -1883,6 +1947,7 @@ document.addEventListener("alpine:init", () => {
       // Cap to last ~100 messages, track if there are more
       const MESSAGE_CAP = 100;
       this.hasEarlierMessages = allMessages.length > MESSAGE_CAP;
+      this.allNormalizedMessages = allMessages; // Store full list for loadEarlierMessages
       this.renderedMessages = allMessages.slice(-MESSAGE_CAP);
 
       this.userScrolledUp = false;
@@ -1921,9 +1986,41 @@ document.addEventListener("alpine:init", () => {
     },
 
     loadEarlierMessages() {
-      // This would require storing the full message list and is a larger change
-      // For now, show a message that full history loading isn't implemented
-      alert("Full message history loading not yet implemented. The session may have more messages.");
+      // Load earlier messages from the stored full message list
+      if (!this.allNormalizedMessages || this.allNormalizedMessages.length === 0) {
+        alert("No earlier messages available.");
+        return;
+      }
+
+      const currentFirstId = this.renderedMessages[0]?.id;
+      if (!currentFirstId) {
+        return;
+      }
+
+      // Find the index of the current first message in the full list
+      let currentIndex = -1;
+      for (let i = 0; i < this.allNormalizedMessages.length; i++) {
+        if (this.allNormalizedMessages[i].id === currentFirstId) {
+          currentIndex = i;
+          break;
+        }
+      }
+
+      if (currentIndex <= 0) {
+        alert("No earlier messages to load.");
+        return;
+      }
+
+      // Load up to 100 earlier messages
+      const LOAD_COUNT = 100;
+      const start = Math.max(0, currentIndex - LOAD_COUNT);
+      const earlierMessages = this.allNormalizedMessages.slice(start, currentIndex);
+
+      // Prepend to renderedMessages
+      this.renderedMessages = [...earlierMessages, ...this.renderedMessages];
+
+      // Update hasEarlierMessages flag
+      this.hasEarlierMessages = start > 0;
     },
 
     latestForkPointId() {
