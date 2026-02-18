@@ -688,7 +688,7 @@ document.addEventListener("alpine:init", () => {
 
     // Auto-scroll state
     userScrolledUp: false,
-    _programmaticScroll: false,
+    _programmaticScrollUntil: 0,
 
     // Image attachments
     pendingImages: [],
@@ -828,11 +828,8 @@ document.addEventListener("alpine:init", () => {
     handleThreadScroll() {
       const el = this.$refs.thread;
       if (!el) return;
-      // Ignore scroll events triggered by programmatic scrolling
-      if (this._programmaticScroll) {
-        this._programmaticScroll = false;
-        return;
-      }
+      // Ignore scroll events triggered by programmatic scrolling (150ms window)
+      if (Date.now() < this._programmaticScrollUntil) return;
       this.userScrolledUp = el.scrollTop + el.clientHeight < el.scrollHeight - 50;
     },
 
@@ -1572,7 +1569,7 @@ document.addEventListener("alpine:init", () => {
         requestAnimationFrame(() => {
           const thread = this.$refs.thread;
           if (!thread) return;
-          this._programmaticScroll = true;
+          this._programmaticScrollUntil = Date.now() + 150;
           thread.scrollTop = thread.scrollHeight;
         });
       });
