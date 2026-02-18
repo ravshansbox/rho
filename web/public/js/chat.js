@@ -928,6 +928,11 @@ document.addEventListener("alpine:init", () => {
 			this.$nextTick(() => {
 				const app = this.$root;
 				if (!app || typeof PullToRefresh === "undefined") return;
+				// Guard against double-init (Alpine re-init / HMR)
+				if (this._ptr) {
+					this._ptr.destroy();
+					this._ptr = null;
+				}
 				this._ptr = new PullToRefresh(app, {
 					onRefresh: () => {
 						window.location.reload();
