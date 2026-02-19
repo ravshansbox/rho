@@ -28,12 +28,12 @@ import {
 } from "../extensions/lib/brain-store.ts";
 import { getRhoHome } from "./config.ts";
 import {
-	createSessionNotFoundError,
 	getRpcSessionFile,
 	type RPCCommand,
 	type RPCEvent,
 	rpcManager,
 } from "./rpc-manager.ts";
+import { RpcSessionReliability } from "./rpc-reliability.ts";
 import {
 	findSessionFileById,
 	listSessions,
@@ -70,6 +70,40 @@ const rpcSessionSubscribers = new Map<
 	WSContext<WebSocket>,
 	Map<string, () => void>
 >();
+
+function readNumericEnv(name: string, fallback: number): number {
+	const raw = process.env[name];
+	if (!raw) {
+		return fallback;
+	}
+	const parsed = Number(raw);
+	if (!Number.isFinite(parsed)) {
+		return fallback;
+	}
+	return parsed;
+}
+
+const rpcReliability = new RpcSessionReliability({
+	eventBufferSize: readNumericEnv("RHO_RPC_EVENT_BUFFER_SIZE", 800),
+	commandRetentionMs: readNumericEnv("RHO_RPC_COMMAND_RETENTION_MS", 300000),
+	orphanGraceMs: readNumericEnv("RHO_RPC_ORPHAN_GRACE_MS", 60000),
+	orphanAbortDelayMs: readNumericEnv("RHO_RPC_ORPHAN_ABORT_DELAY_MS", 5000),
+	hasSubscribers: (sessionId) => rpcManager.hasSubscribers(sessionId),
+	onAbort: (sessionId) => {
+		try {
+			rpcManager.sendCommand(sessionId, {
+				type: "abort",
+				id: `orphan-abort-${Date.now()}`,
+			});
+		} catch {
+			// Ignore abort delivery failures.
+		}
+	},
+	onStop: (sessionId) => {
+		rpcManager.stopSession(sessionId);
+	},
+});
+
 let sessionManagerModulePromise: Promise<{
 	SessionManager: {
 		open(path: string): {
@@ -82,6 +116,8 @@ type WSIncomingMessage = {
 	type?: string;
 	sessionId?: string;
 	sessionFile?: string;
+	lastEventSeq?: number;
+	ts?: number;
 	command?: RPCCommand;
 };
 
@@ -137,6 +173,8 @@ function subscribeToRpcSession(
 	ws: WSContext<WebSocket>,
 	sessionId: string,
 ): void {
+	rpcReliability.cancelOrphan(sessionId);
+
 	let subscriptions = rpcSessionSubscribers.get(ws);
 	if (!subscriptions) {
 		subscriptions = new Map<string, () => void>();
@@ -148,8 +186,15 @@ function subscribeToRpcSession(
 	}
 
 	const unsubscribe = rpcManager.onEvent(sessionId, (event: RPCEvent) => {
+		const seq = rpcReliability.recordEvent(sessionId, event);
 		try {
-			sendWsMessage(ws, { type: "rpc_event", sessionId, event });
+			sendWsMessage(ws, { type: "rpc_event", sessionId, seq, event });
+			if (
+				event.type === "rpc_session_stopped" ||
+				event.type === "rpc_process_crashed"
+			) {
+				rpcReliability.clearSession(sessionId);
+			}
 		} catch {
 			const wsSubscriptions = rpcSessionSubscribers.get(ws);
 			wsSubscriptions?.get(sessionId)?.();
@@ -158,7 +203,7 @@ function subscribeToRpcSession(
 				rpcSessionSubscribers.delete(ws);
 			}
 			if (!rpcManager.hasSubscribers(sessionId)) {
-				rpcManager.stopSession(sessionId);
+				rpcReliability.scheduleOrphan(sessionId);
 			}
 		}
 	});
@@ -178,10 +223,9 @@ function clearRpcSubscriptions(ws: WSContext<WebSocket>): void {
 	}
 	rpcSessionSubscribers.delete(ws);
 
-	// Stop sessions that have no remaining subscribers
 	for (const sessionId of sessionIds) {
 		if (!rpcManager.hasSubscribers(sessionId)) {
-			rpcManager.stopSession(sessionId);
+			rpcReliability.scheduleOrphan(sessionId);
 		}
 	}
 }
@@ -192,6 +236,42 @@ function extractSessionFile(payload: WSIncomingMessage): string | null {
 	}
 
 	return getRpcSessionFile(payload.command);
+}
+
+function parseLastEventSeq(payload: WSIncomingMessage): number {
+	if (typeof payload.lastEventSeq !== "number") {
+		return 0;
+	}
+	if (!Number.isFinite(payload.lastEventSeq)) {
+		return 0;
+	}
+	return Math.max(0, Math.floor(payload.lastEventSeq));
+}
+
+function replayBufferedRpcEvents(
+	ws: WSContext<WebSocket>,
+	sessionId: string,
+	lastEventSeq: number,
+): void {
+	const replay = rpcReliability.getReplay(sessionId, lastEventSeq);
+	if (replay.gap) {
+		sendWsMessage(ws, {
+			type: "rpc_replay_gap",
+			sessionId,
+			oldestSeq: replay.oldestSeq,
+			latestSeq: replay.latestSeq,
+		});
+	}
+
+	for (const buffered of replay.events) {
+		sendWsMessage(ws, {
+			type: "rpc_event",
+			sessionId,
+			seq: buffered.seq,
+			replay: true,
+			event: buffered.event,
+		});
+	}
 }
 
 async function loadPiSessionManagerModule(): Promise<{
@@ -1470,6 +1550,17 @@ app.get(
 				return;
 			}
 
+			if (payload?.type === "rpc_ping") {
+				sendWsMessage(ws, {
+					type: "rpc_pong",
+					ts:
+						typeof payload.ts === "number" && Number.isFinite(payload.ts)
+							? payload.ts
+							: Date.now(),
+				});
+				return;
+			}
+
 			if (payload?.type !== "rpc_command") {
 				return;
 			}
@@ -1489,6 +1580,11 @@ app.get(
 
 			let sessionId =
 				typeof payload.sessionId === "string" ? payload.sessionId.trim() : "";
+			const shouldReplayFromSeq = Object.prototype.hasOwnProperty.call(
+				payload,
+				"lastEventSeq",
+			);
+			const lastEventSeq = parseLastEventSeq(payload);
 
 			if (!sessionId) {
 				const sessionFile = extractSessionFile(payload);
@@ -1501,7 +1597,6 @@ app.get(
 					return;
 				}
 
-				// Reuse existing RPC process for the same session file
 				const existingId = rpcManager.findSessionByFile(sessionFile);
 				if (existingId) {
 					sessionId = existingId;
@@ -1517,13 +1612,15 @@ app.get(
 						return;
 					}
 				}
+
 				subscribeToRpcSession(ws, sessionId);
 				sendWsMessage(ws, { type: "session_started", sessionId, sessionFile });
 				if (existingId) {
-					rpcManager.sendCommand(sessionId, { type: "get_state" });
+					rpcManager.sendCommand(sessionId, {
+						type: "get_state",
+						id: `server-get-state-${Date.now()}`,
+					});
 				}
-				// Skip the switch_session command — either startSession() already
-				// sent it, or we're reusing a session already on the right file
 				if (command.type === "switch_session") {
 					return;
 				}
@@ -1531,7 +1628,31 @@ app.get(
 				try {
 					subscribeToRpcSession(ws, sessionId);
 				} catch {
-					sendWsMessage(ws, createSessionNotFoundError(sessionId));
+					sendWsMessage(ws, {
+						type: "rpc_session_not_found",
+						sessionId,
+						message: `Unknown RPC session: ${sessionId}`,
+					});
+					return;
+				}
+			}
+
+			if (shouldReplayFromSeq) {
+				replayBufferedRpcEvents(ws, sessionId, lastEventSeq);
+			}
+
+			const commandId = typeof command.id === "string" ? command.id.trim() : "";
+			if (commandId) {
+				const dedupe = rpcReliability.registerCommand(sessionId, commandId);
+				if (dedupe.duplicate) {
+					if (dedupe.cachedResponse) {
+						sendWsMessage(ws, {
+							type: "rpc_event",
+							sessionId,
+							seq: dedupe.cachedResponseSeq,
+							event: dedupe.cachedResponse,
+						});
+					}
 					return;
 				}
 			}
@@ -1632,6 +1753,7 @@ export function disposeServerResources(): void {
 	for (const ws of rpcSessionSubscribers.keys()) {
 		clearRpcSubscriptions(ws);
 	}
+	rpcReliability.dispose();
 	rpcManager.dispose();
 }
 
