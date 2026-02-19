@@ -19,16 +19,15 @@
     };
   </script>
 </head>
-<body x-data="reviewApp()" @keydown.window="handleKeydown($event)">
+<body x-data="reviewApp()" :class="{ 'review-nav-hidden': isNavHidden }" @keydown.window="handleKeydown($event)">
 
-  <!-- Same nav as main app, Review tab active -->
-  <nav class="nav">
+  <nav class="nav review-nav">
     <div class="nav-inner">
       <div class="nav-seg nav-logo">rho</div>
       <div class="nav-seg nav-title">web ui</div>
       <div class="nav-tabs" role="tablist">
-        <a class="nav-tab" href="/" role="tab">Chat</a>
-        <a class="nav-tab" href="/" role="tab">Brain</a>
+        <a class="nav-tab" href="/" role="tab" @click="guardLeaveNavigation($event)">Chat</a>
+        <a class="nav-tab nav-tab--brain" href="/" role="tab" @click="guardLeaveNavigation($event)">Brain</a>
         <a class="nav-tab active" href="/review" role="tab">Review</a>
         <span class="nav-tab review-session-info">
           <span x-text="files.length + ' file' + (files.length !== 1 ? 's' : '')"></span>
@@ -45,8 +44,7 @@
     </div>
   </template>
 
-  <div class="layout" x-show="!reviewComplete">
-    <!-- Sidebar / mobile file panel -->
+  <div class="layout" x-show="!reviewComplete" :class="{ 'layout--single-file-mobile': files.length === 1 }">
     <aside class="sidebar" :class="{ 'sidebar--open': showFilesPanel }">
       <button class="sidebar-toggle" @click="showFilesPanel = !showFilesPanel" :aria-expanded="showFilesPanel">
         <span x-text="showFilesPanel ? '▼' : '▶'"></span>
@@ -55,9 +53,10 @@
 
       <ul class="file-list" x-show="showFilesPanel" x-transition>
         <template x-for="(file, index) in files" :key="file.path">
-          <li class="file-item"
-              :class="{ 'file-item--active': index === activeFileIndex }"
-              @click="selectFile(index)">
+          <li
+            class="file-item"
+            :class="{ 'file-item--active': index === activeFileIndex }"
+            @click="selectFile(index)">
             <span class="file-name" x-text="file.relativePath"></span>
             <span class="file-badge" x-text="fileCommentCount(file.relativePath)"></span>
           </li>
@@ -65,11 +64,11 @@
       </ul>
     </aside>
 
-    <!-- Code area -->
-    <main class="code-area">
+    <main class="code-area" x-ref="codeArea" @scroll.passive="onCodeScroll($event)">
       <template x-if="connectionLost">
         <div class="connection-lost-banner">Connection lost — review cancelled by server.</div>
       </template>
+
       <template x-if="fileWarnings.length > 0">
         <div class="warnings-list">
           <template x-for="(w, wi) in fileWarnings" :key="wi">
@@ -80,47 +79,107 @@
           </template>
         </div>
       </template>
+
       <template x-if="contextMessage">
         <div class="context-banner" x-text="contextMessage"></div>
       </template>
+
       <template x-if="activeFile">
         <div>
           <div class="file-header">
             <span class="file-header-name" x-text="activeFile.relativePath"></span>
-            <span class="file-header-lang" x-text="activeFile.language"></span>
+            <div class="file-header-meta">
+              <button
+                class="wrap-toggle"
+                type="button"
+                @click="toggleWrapLines()"
+                :aria-pressed="wrapLongLines"
+                :title="wrapLongLines ? 'Wrap is on — tap to disable' : 'Wrap is off — tap to enable'"
+                x-text="'Wrap: ' + (wrapLongLines ? 'On' : 'Off')"
+              ></button>
+              <span class="file-header-lang" x-text="activeFile.language"></span>
+            </div>
           </div>
-          <div class="code-viewer">
-            <div class="code-block"><template x-for="(line, i) in activeFile.highlightedLines" :key="i"><div class="code-line-wrapper"><div class="code-line" :class="{ 'code-line--selected': isLineSelected(i + 1), 'code-line--commented': isLineCommented(i + 1) }"><span class="line-number" @click="onLineClick(i + 1, $event)" x-text="i + 1"></span><span class="line-content" x-html="line"></span></div><template x-for="(cmt, ci) in getCommentsForLine(i + 1)" :key="ci"><div class="saved-comment">
-    <div class="saved-comment-header">
-      <span class="saved-comment-range" x-text="cmt.startLine === cmt.endLine ? 'Line ' + cmt.startLine : 'Lines ' + cmt.startLine + '–' + cmt.endLine"></span>
-      <div class="saved-comment-actions">
-        <button class="btn-icon" @click="editComment(activeFile.relativePath, ci)" title="Edit">✏️</button>
-        <button class="btn-icon" @click="deleteComment(activeFile.relativePath, ci)" title="Delete">🗑️</button>
-      </div>
-    </div>
-    <details class="saved-comment-quote">
-      <summary>source</summary>
-      <pre x-text="cmt.selectedText"></pre>
-    </details>
-    <p class="saved-comment-text" x-text="cmt.comment"></p>
-  </div></template><template x-if="activeComment && activeComment.endLine === (i + 1) && activeComment.fileIndex === activeFileIndex"><div class="comment-form">
-    <div class="comment-form-header">
-      <span class="comment-range" x-text="activeComment.startLine === activeComment.endLine ? 'Line ' + activeComment.startLine : 'Lines ' + activeComment.startLine + '–' + activeComment.endLine"></span>
-      <div class="range-controls">
-        <button @click="expandRangeUp()" :disabled="activeComment.startLine <= 1">▲</button>
-        <button @click="expandRangeDown()" :disabled="activeComment.endLine >= activeFile.highlightedLines.length">▼</button>
-      </div>
-    </div>
-    <blockquote class="comment-quote" x-text="getSelectedText()"></blockquote>
-    <textarea class="comment-input" x-model="activeComment.text" placeholder="Leave a comment…" rows="3" x-ref="commentInput"></textarea>
-    <div class="comment-form-actions">
-      <button class="btn btn--cancel" @click="cancelComment()">Cancel</button>
-      <button class="btn btn--save" @click="saveComment()">Save</button>
-    </div>
-  </div></template></div></template></div>
+
+          <div class="code-viewer" :class="{ 'code-viewer--wrap': wrapLongLines }">
+            <div class="code-block">
+              <template x-for="(line, i) in activeFile.highlightedLines" :key="i">
+                <div class="code-line-wrapper">
+                  <div
+                    class="code-line"
+                    :class="{
+                      'code-line--selected': isLineSelected(i + 1),
+                      'code-line--commented': isLineCommented(i + 1)
+                    }">
+                    <span class="line-number" @click="onLineClick(i + 1, $event)" x-text="i + 1"></span>
+                    <span class="line-content" x-html="line"></span>
+                  </div>
+
+                  <template x-for="(cmt, ci) in getCommentsForLine(i + 1)" :key="cmt.id || ci">
+                    <div class="saved-comment" :class="{ 'saved-comment--collapsed': !isCommentExpanded(cmt) }">
+                      <div class="saved-comment-header">
+                        <button class="saved-comment-main" type="button" @click="toggleCommentExpanded(cmt)">
+                          <span
+                            class="saved-comment-range"
+                            x-text="cmt.startLine === cmt.endLine ? 'Line ' + cmt.startLine : 'Lines ' + cmt.startLine + '–' + cmt.endLine"></span>
+                          <span class="saved-comment-toggle" x-text="isCommentExpanded(cmt) ? '▾' : '▸'"></span>
+                        </button>
+                        <div class="saved-comment-actions">
+                          <button class="btn-icon" @click="editComment(activeFile.relativePath, ci)" title="Edit">✏️</button>
+                          <button class="btn-icon" @click="deleteComment(activeFile.relativePath, ci)" title="Delete">🗑️</button>
+                        </div>
+                      </div>
+
+                      <div class="saved-comment-body" x-show="isCommentExpanded(cmt)" x-transition.opacity.duration.120ms>
+                        <details class="saved-comment-quote">
+                          <summary>source</summary>
+                          <pre x-text="cmt.selectedText"></pre>
+                        </details>
+                        <p class="saved-comment-text" x-text="cmt.comment"></p>
+                      </div>
+                    </div>
+                  </template>
+
+                  <template x-if="activeComment && activeComment.endLine === (i + 1) && activeComment.fileIndex === activeFileIndex">
+                    <div class="comment-form">
+                      <div class="comment-form-header">
+                        <span
+                          class="comment-range"
+                          x-text="activeComment.startLine === activeComment.endLine ? 'Line ' + activeComment.startLine : 'Lines ' + activeComment.startLine + '–' + activeComment.endLine"></span>
+                        <div class="range-controls">
+                          <button @click="undoRangeChange()" :disabled="!canUndoRange()" title="Undo last range change">↶</button>
+                          <button @click="expandRangeUp()" :disabled="activeComment.startLine <= 1">▲</button>
+                          <button @click="expandRangeDown()" :disabled="activeComment.endLine >= activeFile.highlightedLines.length">▼</button>
+                        </div>
+                      </div>
+
+                      <details class="comment-source-toggle">
+                        <summary>source</summary>
+                        <pre class="comment-source-preview" x-text="getSelectedText()"></pre>
+                      </details>
+
+                      <textarea
+                        class="comment-input"
+                        x-model="activeComment.text"
+                        placeholder="Leave a comment…"
+                        rows="3"
+                        x-ref="commentInput"
+                        @focus="onCommentInputFocus()"
+                        @blur="onCommentInputBlur()"></textarea>
+
+                      <div class="comment-form-actions">
+                        <button class="btn btn--cancel" @click="cancelComment()">Cancel</button>
+                        <button class="btn btn--save" @click="saveComment()">Save</button>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </template>
+            </div>
           </div>
         </div>
       </template>
+
       <template x-if="!activeFile">
         <div class="empty-state">
           <p>No files loaded.</p>
@@ -129,8 +188,7 @@
     </main>
   </div>
 
-  <!-- Bottom bar -->
-  <footer class="action-bar" x-show="!reviewComplete">
+  <footer class="action-bar" x-show="!reviewComplete && !isKeyboardMode">
     <span class="action-bar-count" x-text="totalComments() + ' comment' + (totalComments() !== 1 ? 's' : '')"></span>
     <div class="action-bar-actions">
       <button class="btn btn--cancel" @click="cancelReview()">Cancel</button>
