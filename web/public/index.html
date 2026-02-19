@@ -1058,6 +1058,19 @@
                       </div>
                     </template>
 
+                    <template x-if="submissions.length > 0">
+                      <div class="reviewdash-section">
+                        <div class="reviewdash-section-title">submitted inbox</div>
+                        <template x-for="entry in submissions" :key="entry.id">
+                          <div class="reviewdash-review-row">
+                            <span class="reviewdash-dot"></span>
+                            <span class="reviewdash-review-files" x-text="entry.files.join(', ')"></span>
+                            <span class="text-muted" x-text="submissionMeta(entry)"></span>
+                          </div>
+                        </template>
+                      </div>
+                    </template>
+
                     <template x-if="gitStatus.files.length > 0">
                       <div class="reviewdash-files">
                         <template x-for="file in gitStatus.files" :key="file.path">

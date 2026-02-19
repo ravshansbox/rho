@@ -795,11 +795,12 @@ button {
 	background: rgba(34, 197, 94, 0.15);
 	border-color: rgba(34, 197, 94, 0.35);
 	width: 100%;
-	text-align: right;
 }
 
 .chat-message.user .chat-text {
-	text-align: right;
+	text-align: start;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
 }
 
 .chat-message.user .chat-usage {

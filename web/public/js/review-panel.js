@@ -6,6 +6,7 @@ function rhoReviewDashboard() {
 		expanded: [],
 		diffs: {},
 		reviews: [],
+		submissions: [],
 		error: null,
 		actionError: null,
 		isStartingReview: false,
@@ -51,9 +52,10 @@ function rhoReviewDashboard() {
 				return;
 			}
 			try {
-				const [statusRes, reviewsRes] = await Promise.all([
+				const [statusRes, reviewsRes, submissionsRes] = await Promise.all([
 					fetch("/api/git/status"),
 					fetch("/api/review/sessions"),
+					fetch("/api/review/submissions?status=inbox&limit=20"),
 				]);
 
 				if (statusRes.ok) {
@@ -75,6 +77,11 @@ function rhoReviewDashboard() {
 				if (reviewsRes.ok) {
 					const data = await reviewsRes.json();
 					this.reviews = data.filter((r) => !r.done);
+				}
+
+				if (submissionsRes.ok) {
+					const data = await submissionsRes.json();
+					this.submissions = Array.isArray(data) ? data : [];
 				}
 			} catch {
 				// keep current state
@@ -178,6 +185,13 @@ function rhoReviewDashboard() {
 			if (diff < 3600000) return Math.floor(diff / 60000) + "m ago";
 			if (diff < 86400000) return Math.floor(diff / 3600000) + "h ago";
 			return Math.floor(diff / 86400000) + "d ago";
+		},
+
+		submissionMeta(entry) {
+			const claimed = entry?.claimedBy
+				? ` · claimed by ${entry.claimedBy}`
+				: "";
+			return `${entry.commentCount} comment${entry.commentCount !== 1 ? "s" : ""}${claimed}`;
 		},
 
 		renderDiff(diffText) {
