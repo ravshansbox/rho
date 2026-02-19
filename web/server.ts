@@ -28,6 +28,18 @@ import {
 } from "../extensions/lib/brain-store.ts";
 import { getRhoHome } from "./config.ts";
 import {
+	cancelReviewRecord,
+	claimReviewRecord,
+	createReviewRecord,
+	getReviewRecord,
+	listReviewRecords,
+	type ReviewStatus,
+	ReviewStoreError,
+	resolveReviewRecord,
+	type StoredReviewRecord,
+	submitReviewRecord,
+} from "./review-store.ts";
+import {
 	getRpcSessionFile,
 	type RPCCommand,
 	type RPCEvent,
@@ -160,6 +172,112 @@ function getReviewSession(id: string): ReviewSession | null {
 function requireReviewToken(c: Context, session: ReviewSession): boolean {
 	const token = c.req.query("token");
 	return typeof token === "string" && token === session.token;
+}
+
+function toReviewSessionListItem(session: ReviewSession) {
+	return {
+		id: session.id,
+		fileCount: session.files.length,
+		files: session.files.map((f) => f.relativePath),
+		message: session.message ?? null,
+		createdAt: session.createdAt,
+		done: session.done,
+		cancelled: session.result?.cancelled ?? null,
+		commentCount: session.result?.comments?.length ?? 0,
+		token: session.token,
+	};
+}
+
+function toSubmissionSummary(record: StoredReviewRecord) {
+	return {
+		id: record.id,
+		status: record.status,
+		createdAt: record.createdAt,
+		updatedAt: record.updatedAt,
+		submittedAt: record.submittedAt,
+		claimedAt: record.claimedAt,
+		claimedBy: record.claimedBy,
+		resolvedAt: record.resolvedAt,
+		resolvedBy: record.resolvedBy,
+		fileCount: record.request.files.length,
+		files: record.request.files,
+		message: record.request.message ?? null,
+		commentCount: record.resultSummary.commentCount,
+	};
+}
+
+function parseReviewListStatus(
+	raw: string | undefined,
+): ReviewStatus | "inbox" | "all" {
+	if (!raw) return "inbox";
+	const status = raw.toLowerCase();
+	if (
+		status === "open" ||
+		status === "submitted" ||
+		status === "cancelled" ||
+		status === "claimed" ||
+		status === "resolved" ||
+		status === "all" ||
+		status === "inbox"
+	) {
+		return status;
+	}
+	return "inbox";
+}
+
+async function persistOpenReviewSession(
+	session: ReviewSession,
+	request: {
+		cwd?: string;
+		branch?: string;
+		commit?: string;
+		source?: "tool" | "git" | "manual";
+	},
+): Promise<void> {
+	await createReviewRecord({
+		id: session.id,
+		createdAt: session.createdAt,
+		request: {
+			files: session.files.map((f) => f.relativePath),
+			warnings: session.warnings,
+			message: session.message,
+			cwd: request.cwd,
+			branch: request.branch,
+			commit: request.commit,
+			source: request.source,
+		},
+	});
+}
+
+async function persistReviewCompletion(session: ReviewSession): Promise<void> {
+	if (!session.result) return;
+	if (session.result.cancelled) {
+		await cancelReviewRecord(session.id);
+		return;
+	}
+	await submitReviewRecord(session.id, session.result.comments);
+}
+
+function mapReviewStoreError(error: unknown): {
+	status: number;
+	message: string;
+} {
+	if (!(error instanceof ReviewStoreError)) {
+		return {
+			status: 500,
+			message: (error as Error).message || "Internal review store error",
+		};
+	}
+	if (error.code === "NOT_FOUND") {
+		return { status: 404, message: error.message };
+	}
+	if (error.code === "CONFLICT") {
+		return { status: 409, message: error.message };
+	}
+	if (error.code === "INVALID_STATE" || error.code === "INVALID_INPUT") {
+		return { status: 400, message: error.message };
+	}
+	return { status: 500, message: error.message };
 }
 
 function sendWsMessage(
@@ -344,21 +462,7 @@ app.get("/api/health", (c) => c.json({ status: "ok" }));
 // --- Review API ---
 
 app.get("/api/review/sessions", (c) => {
-	const sessions = [];
-	for (const [id, s] of reviewSessions) {
-		sessions.push({
-			id,
-			fileCount: s.files.length,
-			files: s.files.map((f) => f.relativePath),
-			message: s.message ?? null,
-			createdAt: s.createdAt,
-			done: s.done,
-			cancelled: s.result?.cancelled ?? null,
-			commentCount: s.result?.comments?.length ?? 0,
-			token: s.token,
-		});
-	}
-	// Newest first
+	const sessions = [...reviewSessions.values()].map(toReviewSessionListItem);
 	sessions.sort((a, b) => b.createdAt - a.createdAt);
 	return c.json(sessions);
 });
@@ -392,23 +496,107 @@ app.post("/api/review/sessions", async (c) => {
 	};
 
 	reviewSessions.set(id, session);
+	try {
+		await persistOpenReviewSession(session, { source: "tool" });
+	} catch (error) {
+		reviewSessions.delete(id);
+		return c.json(
+			{ error: (error as Error).message ?? "Failed to persist review" },
+			500,
+		);
+	}
 
-	// Auto-expire stale sessions
-	setTimeout(
-		() => {
-			const s = reviewSessions.get(id);
-			if (!s) return;
-			// Keep active sessions for up to 2 hours
-			if (Date.now() - s.createdAt > 2 * 60 * 60 * 1000) {
-				reviewSessions.delete(id);
-			}
-		},
-		2 * 60 * 60 * 1000,
-	).unref?.();
+	const openTtlMs = readNumericEnv(
+		"RHO_REVIEW_OPEN_TTL_MS",
+		24 * 60 * 60 * 1000,
+	);
+	setTimeout(() => {
+		const current = reviewSessions.get(id);
+		if (!current) return;
+		if (!current.done && Date.now() - current.createdAt > openTtlMs) {
+			current.done = true;
+			current.result = { cancelled: true, comments: [] };
+			void persistReviewCompletion(current).catch((error) => {
+				console.warn(
+					`Failed to persist review auto-cancel for ${id}: ${(error as Error).message}`,
+				);
+			});
+			reviewSessions.delete(id);
+		}
+	}, openTtlMs).unref?.();
 
 	const origin = new URL(c.req.url).origin;
 	const url = `${origin}/review/${id}?token=${token}`;
 	return c.json({ id, token, url });
+});
+
+app.get("/api/review/submissions", async (c) => {
+	const status = parseReviewListStatus(c.req.query("status"));
+	const claimedBy = c.req.query("claimedBy");
+	const limitRaw = Number(c.req.query("limit") ?? "50");
+	const limit = Number.isFinite(limitRaw)
+		? Math.max(1, Math.min(Math.floor(limitRaw), 200))
+		: 50;
+
+	try {
+		const records = await listReviewRecords({ status, claimedBy, limit });
+		return c.json(records.map(toSubmissionSummary));
+	} catch (error) {
+		return c.json(
+			{ error: (error as Error).message ?? "Failed to list submissions" },
+			500,
+		);
+	}
+});
+
+app.get("/api/review/submissions/:id", async (c) => {
+	const id = c.req.param("id");
+	const record = await getReviewRecord(id);
+	if (!record) {
+		return c.json({ error: "not found" }, 404);
+	}
+	return c.json(record);
+});
+
+app.post("/api/review/submissions/:id/claim", async (c) => {
+	const id = c.req.param("id");
+	let body: { claimedBy?: string } = {};
+	try {
+		body = await c.req.json();
+	} catch {
+		// optional body
+	}
+
+	const claimedBy =
+		typeof body.claimedBy === "string" && body.claimedBy.trim()
+			? body.claimedBy.trim()
+			: "agent";
+
+	try {
+		const record = await claimReviewRecord(id, claimedBy);
+		return c.json(toSubmissionSummary(record));
+	} catch (error) {
+		const mapped = mapReviewStoreError(error);
+		return c.json({ error: mapped.message }, mapped.status);
+	}
+});
+
+app.post("/api/review/submissions/:id/resolve", async (c) => {
+	const id = c.req.param("id");
+	let body: { resolvedBy?: string } = {};
+	try {
+		body = await c.req.json();
+	} catch {
+		// optional body
+	}
+
+	try {
+		const record = await resolveReviewRecord(id, body.resolvedBy);
+		return c.json(toSubmissionSummary(record));
+	} catch (error) {
+		const mapped = mapReviewStoreError(error);
+		return c.json({ error: mapped.message }, mapped.status);
+	}
 });
 
 app.delete("/api/review/sessions/:id", (c) => {
@@ -421,15 +609,18 @@ app.delete("/api/review/sessions/:id", (c) => {
 	if (!session.done) {
 		session.done = true;
 		session.result = { cancelled: true, comments: [] };
+		void persistReviewCompletion(session).catch((error) => {
+			console.warn(
+				`Failed to persist review cancel for ${id}: ${(error as Error).message}`,
+			);
+		});
 
-		// Notify tool sockets
 		for (const toolWs of session.toolSockets) {
 			try {
 				sendWsMessage(toolWs, { type: "review_result", ...session.result });
 			} catch {}
 		}
 
-		// Close UI sockets
 		for (const uiWs of session.uiSockets) {
 			try {
 				uiWs.close();
@@ -437,7 +628,6 @@ app.delete("/api/review/sessions/:id", (c) => {
 		}
 	}
 
-	// Remove session immediately
 	reviewSessions.delete(id);
 	return c.json({ ok: true });
 });
@@ -556,26 +746,29 @@ app.get(
 					return;
 				}
 
-				// Fan out to tool sockets
+				void persistReviewCompletion(session).catch((error) => {
+					console.warn(
+						`Failed to persist review completion for ${id}: ${(error as Error).message}`,
+					);
+				});
+
 				for (const toolWs of session.toolSockets) {
 					try {
 						sendWsMessage(toolWs, { type: "review_result", ...session.result });
 					} catch {}
 				}
 
-				// Close all UI sockets
 				for (const uiWs of session.uiSockets) {
 					try {
 						uiWs.close();
 					} catch {}
 				}
 
-				// Cleanup after 10 minutes
 				setTimeout(
 					() => {
 						reviewSessions.delete(id);
 					},
-					10 * 60 * 1000,
+					30 * 60 * 1000,
 				).unref?.();
 			},
 			onClose: (_, ws) => {
@@ -933,15 +1126,54 @@ app.post("/api/review/from-git", async (c) => {
 
 	reviewSessions.set(id, session);
 
-	setTimeout(
-		() => {
-			const s = reviewSessions.get(id);
-			if (s && Date.now() - s.createdAt > 2 * 60 * 60 * 1000) {
-				reviewSessions.delete(id);
-			}
-		},
-		2 * 60 * 60 * 1000,
-	).unref?.();
+	let branch: string | undefined;
+	let commit: string | undefined;
+	try {
+		branch = (await gitExec(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).trim();
+		if (!branch) branch = undefined;
+	} catch {
+		branch = undefined;
+	}
+	try {
+		commit = (await gitExec(["rev-parse", "HEAD"], cwd)).trim();
+		if (!commit) commit = undefined;
+	} catch {
+		commit = undefined;
+	}
+
+	try {
+		await persistOpenReviewSession(session, {
+			cwd,
+			branch,
+			commit,
+			source: "git",
+		});
+	} catch (error) {
+		reviewSessions.delete(id);
+		return c.json(
+			{ error: (error as Error).message ?? "Failed to persist review" },
+			500,
+		);
+	}
+
+	const openTtlMs = readNumericEnv(
+		"RHO_REVIEW_OPEN_TTL_MS",
+		24 * 60 * 60 * 1000,
+	);
+	setTimeout(() => {
+		const current = reviewSessions.get(id);
+		if (!current) return;
+		if (!current.done && Date.now() - current.createdAt > openTtlMs) {
+			current.done = true;
+			current.result = { cancelled: true, comments: [] };
+			void persistReviewCompletion(current).catch((error) => {
+				console.warn(
+					`Failed to persist review auto-cancel for ${id}: ${(error as Error).message}`,
+				);
+			});
+			reviewSessions.delete(id);
+		}
+	}, openTtlMs).unref?.();
 
 	const origin = new URL(c.req.url).origin;
 	const url = `${origin}/review/${id}?token=${token}`;
@@ -1580,10 +1812,7 @@ app.get(
 
 			let sessionId =
 				typeof payload.sessionId === "string" ? payload.sessionId.trim() : "";
-			const shouldReplayFromSeq = Object.prototype.hasOwnProperty.call(
-				payload,
-				"lastEventSeq",
-			);
+			const shouldReplayFromSeq = Object.hasOwn(payload, "lastEventSeq");
 			const lastEventSeq = parseLastEventSeq(payload);
 
 			if (!sessionId) {
