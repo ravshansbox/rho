@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url";
 
 let PASS = 0;
 let FAIL = 0;
+let cachedFactory: (() => any) | null = null;
 
 function assert(condition: boolean, label: string): void {
 	if (condition) {
@@ -98,7 +99,7 @@ class MockWebSocket {
 
 async function loadChatVm(): Promise<any> {
 	MockWebSocket.instances = [];
-	let factory: (() => any) | null = null;
+	let factory: (() => any) | null = cachedFactory;
 	const listeners = new Map<string, (...args: any[]) => void>();
 
 	(globalThis as any).document = {
@@ -156,18 +157,26 @@ async function loadChatVm(): Promise<any> {
 		},
 	};
 
-	const chatPath = path.resolve(
-		import.meta.dirname!,
-		"../web/public/js/chat.js",
-	);
-	await import(pathToFileURL(chatPath).href + `?reconnect-test=${Date.now()}`);
+	if (!cachedFactory) {
+		const chatPath = path.resolve(
+			import.meta.dirname!,
+			"../web/public/js/chat.js",
+		);
+		await import(
+			pathToFileURL(chatPath).href + `?reconnect-test=${Date.now()}`
+		);
 
-	const init = listeners.get("alpine:init");
-	if (!init) {
-		throw new Error("chat.js did not register alpine:init listener");
+		const init = listeners.get("alpine:init");
+		if (!init) {
+			throw new Error("chat.js did not register alpine:init listener");
+		}
+		init();
+		cachedFactory = factory;
 	}
-	init();
 
+	if (!factory) {
+		factory = cachedFactory;
+	}
 	if (!factory) {
 		throw new Error("chat.js did not register Alpine.data factory");
 	}
