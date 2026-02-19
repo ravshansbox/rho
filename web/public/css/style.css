@@ -1209,7 +1209,16 @@ body.theme-light .chat-text blockquote {
 	flex-wrap: wrap;
 }
 .sem-file-icon {
-	font-size: 0.75rem;
+	font-size: 0.54rem;
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--text-dim);
+	border: 1px solid var(--border);
+	border-radius: 999px;
+	background: var(--bg-alt);
+	padding: 0.08rem 0.35rem;
+	line-height: 1.2;
 	flex-shrink: 0;
 }
 .sem-file-path {
@@ -1422,7 +1431,16 @@ body.theme-light .chat-text blockquote {
 	border-bottom: 1px solid var(--border);
 }
 .sem-action-badge {
-	font-size: 0.75rem;
+	font-size: 0.54rem;
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--text-dim);
+	border: 1px solid var(--border);
+	border-radius: 999px;
+	background: var(--bg-alt);
+	padding: 0.08rem 0.35rem;
+	line-height: 1.2;
 	flex-shrink: 0;
 }
 .sem-action-label {
@@ -1466,6 +1484,9 @@ body.theme-light .chat-text blockquote {
 /* Thinking block styles */
 .thinking-icon {
 	margin-right: 0.35rem;
+	font-size: 0.6rem;
+	letter-spacing: 0.08em;
+	color: var(--text-dim);
 }
 .thinking-preview {
 	padding: 0.3rem 0.5rem 0.3rem 1.5rem;
@@ -1887,8 +1908,9 @@ body.theme-light .chat-text blockquote {
 }
 
 .chat-attach-btn {
-	font-size: 1rem;
-	padding: 0.3rem 0.5rem;
+	font-size: 0.62rem;
+	letter-spacing: 0.08em;
+	padding: 0.3rem 0.6rem;
 }
 
 /* ─── Queue bar ─── */
@@ -1985,9 +2007,14 @@ body.theme-light .chat-text blockquote {
 	text-transform: none;
 }
 
-.chat-queue-remove,
-.chat-queue-attach {
+.chat-queue-remove {
 	font-size: 0.7rem;
+	cursor: pointer;
+}
+
+.chat-queue-attach {
+	font-size: 0.56rem;
+	letter-spacing: 0.08em;
 	cursor: pointer;
 }
 

@@ -160,7 +160,6 @@
                   </div>
                   <div class="chat-session-count" x-show="sessions.length > 0 && !allSessionsLoaded" x-text="`${sessions.length} of ${sessionsTotal}`"></div>
                   <div class="chat-empty-state" x-show="!isLoadingSessions && sessions.length === 0">
-                    <span class="empty-icon">&#x1F4C1;</span>
                     <span>No sessions yet</span>
                     <span class="empty-hint">Sessions appear here when you start using Rho CLI</span>
                   </div>
@@ -174,7 +173,7 @@
               >
                 <!-- Drop zone overlay -->
                 <div class="chat-drop-overlay" x-show="isDraggingOver" x-cloak x-transition.opacity>
-                  <div class="chat-drop-label">📎 Drop image to attach</div>
+                  <div class="chat-drop-label">Drop image to attach</div>
                 </div>
 
                 <div class="chat-thread-header">
@@ -228,11 +227,9 @@
                     <span>Loading session...</span>
                   </div>
                   <div class="chat-empty" x-show="!isLoadingSession && activeSession && !hasMessages()">
-                    <span class="empty-icon">&#x1F4AC;</span>
                     <span x-text="isForkActive() ? 'Type a message below to start chatting.' : 'No messages yet. Fork this session to start chatting.'"></span>
                   </div>
                   <div class="chat-empty" x-show="!activeSession && !isLoadingSession">
-                    <span class="empty-icon">&#x1F4C2;</span>
                     <span>Select a session from the sidebar to view messages.</span>
                   </div>
 
@@ -284,7 +281,7 @@
                             <template x-if="part.type === 'thinking'">
                               <div class="chat-block thinking" x-data="{ open: false }">
                                 <button class="chat-block-toggle" type="button" @click="open = !open">
-                                  <span class="thinking-icon">💭</span>
+                                  <span class="thinking-icon">···</span>
                                   Thinking
                                   <span class="tool-chevron" x-text="open ? '▾' : '▸'"></span>
                                 </button>
@@ -336,7 +333,7 @@
                                   <template x-if="part.semantic && part.semantic.tool === 'edit' && !showRaw">
                                     <div class="sem-edit">
                                       <div class="sem-file-header">
-                                        <span class="sem-file-icon">📄</span>
+                                        <span class="sem-file-icon">Edit</span>
                                         <span class="sem-file-path" :title="part.semantic.path" x-text="part.semantic.path"></span>
                                         <span class="sem-diff-stats" x-show="part.semantic.success && part.semantic.hasOldNew">
                                           <span class="diff-pill diff-pill-add" x-text="'+' + (part.semantic.linesAdded || 0)"></span>
@@ -372,7 +369,7 @@
                                   <template x-if="part.semantic && part.semantic.tool === 'write' && !showRaw">
                                     <div class="sem-write">
                                       <div class="sem-file-header">
-                                        <span class="sem-file-icon">📝</span>
+                                        <span class="sem-file-icon">Write</span>
                                         <span class="sem-file-path" :title="part.semantic.path" x-text="part.semantic.path"></span>
                                         <span class="sem-badge sem-badge-success" x-show="part.semantic.success">✓ Written</span>
                                       </div>
@@ -384,7 +381,7 @@
                                   <template x-if="part.semantic && part.semantic.tool === 'read' && !showRaw">
                                     <div class="sem-read">
                                       <div class="sem-file-header">
-                                        <span class="sem-file-icon">📖</span>
+                                        <span class="sem-file-icon">Read</span>
                                         <span class="sem-file-path" :title="part.semantic.path" x-text="part.semantic.path"></span>
                                         <span class="sem-file-range" x-show="part.semantic.offset" x-text="'lines ' + part.semantic.offset + (part.semantic.limit ? '-' + (part.semantic.offset + part.semantic.limit - 1) : '+')"></span>
                                         <span class="sem-file-lines" x-text="part.semantic.lineCount + ' lines'"></span>
@@ -437,7 +434,7 @@
                                   <template x-if="part.semantic && part.semantic.tool === 'brain' && !showRaw">
                                     <div class="sem-brain">
                                       <div class="sem-action-header">
-                                        <span class="sem-action-badge">🧠</span>
+                                        <span class="sem-action-badge">Brain</span>
                                         <span class="sem-action-label" x-text="part.semantic.summary"></span>
                                         <span class="sem-action-id" x-show="part.semantic.id" x-text="part.semantic.id"></span>
                                       </div>
@@ -449,7 +446,7 @@
                                   <template x-if="part.semantic && part.semantic.tool === 'vault' && !showRaw">
                                     <div class="sem-vault">
                                       <div class="sem-action-header">
-                                        <span class="sem-action-badge">📚</span>
+                                        <span class="sem-action-badge">Vault</span>
                                         <span class="sem-action-label" x-text="part.semantic.summary"></span>
                                         <span class="sem-action-slug" x-show="part.semantic.slug" x-text="part.semantic.slug"></span>
                                       </div>
@@ -461,7 +458,7 @@
                                   <template x-if="part.semantic && part.semantic.tool === 'email' && !showRaw">
                                     <div class="sem-email">
                                       <div class="sem-action-header">
-                                        <span class="sem-action-badge">✉️</span>
+                                        <span class="sem-action-badge">Email</span>
                                         <span class="sem-action-label" x-text="part.semantic.summary"></span>
                                       </div>
                                       <template x-if="part.semantic.subject">
@@ -580,7 +577,7 @@
                             <span class="chat-queue-item-num" x-text="'#' + (qIdx + 1)"></span>
                             <div class="chat-queue-item-actions">
                               <label class="btn btn-ghost btn-xs chat-queue-attach" title="Attach image">
-                                📎
+                                Attach
                                 <input type="file" accept="image/*" multiple style="display:none" @change="addQueueItemImage(qItem.id, $event)" />
                               </label>
                               <button class="btn btn-ghost btn-xs chat-queue-remove" type="button" @click="removeQueueItem(qItem.id)" title="Remove">✕</button>
@@ -677,7 +674,7 @@
                           :disabled="isSendingPrompt || isForking"
                           title="Attach image"
                         >
-                          📎
+                          Attach
                         </button>
                         <button class="btn" type="submit" :disabled="(!promptText.trim() && pendingImages.length === 0) || isSendingPrompt || isForking">
                           <span x-text="submitButtonLabel()"></span>
@@ -686,7 +683,7 @@
                     </div>
                   </div>
                   <div class="chat-composer-hints" x-show="isForkActive()">
-                    Enter to send · Shift+Enter for newline · Paste, drag, or 📎 to attach images
+                    Enter to send · Shift+Enter for newline · Paste, drag, or use Attach for images
                   </div>
                 </form>
 
@@ -966,7 +963,7 @@
                     <div class="memory-card-meta-right">
                       <span class="memory-card-date" x-show="entry.due">due <span x-text="entry.due"></span></span>
                       <span class="memory-card-date" x-text="entry.created || '--'"></span>
-                      <button class="memory-edit-btn" type="button" @click="startEdit(entry)" title="Edit entry" x-show="editingId !== entry.id">✏</button>
+                      <button class="memory-edit-btn" type="button" @click="startEdit(entry)" title="Edit entry" x-show="editingId !== entry.id">✎</button>
                       <button class="memory-delete-btn" type="button" @click="entry.type === 'task' ? removeTask(entry) : remove(entry)" title="Delete entry" x-show="editingId !== entry.id">&times;</button>
                     </div>
                   </div>
@@ -1001,12 +998,10 @@
                 </div>
               </template>
               <div class="memory-empty" x-show="entries.length === 0 && !isLoading">
-                <span class="empty-icon">&#x1F9E0;</span>
                 <span>No matching entries</span>
               </div>
             </div>
             <div class="memory-empty" x-show="!isLoading && entries.length === 0 && !error">
-              <span class="empty-icon">&#x1F9E0;</span>
               <span>No matching entries</span>
             </div>
           </div>
