@@ -1462,7 +1462,7 @@ document.addEventListener("alpine:init", () => {
 		// Auto-scroll state
 		userScrolledUp: false,
 		_programmaticScrollUntil: 0,
-		_prevScrollTop: 0,
+		_prevScrollTop: null,
 
 		// Image attachments
 		pendingImages: [],
@@ -1584,6 +1584,8 @@ document.addEventListener("alpine:init", () => {
 							const msgId = msgEl.dataset.messageId;
 							if (!msgId) return;
 
+							const wasNearBottom = this.isThreadNearBottom(120);
+
 							// Find and render the message
 							const msg = this.renderedMessages.find((m) => m.id === msgId);
 							if (!msg || !msg.parts) return;
@@ -1613,6 +1615,9 @@ document.addEventListener("alpine:init", () => {
 							if (modified) {
 								this.$nextTick(() => {
 									highlightCodeBlocks(msgEl);
+									if (wasNearBottom && !this.userScrolledUp) {
+										this.scrollThreadToBottom();
+									}
 								});
 							}
 
@@ -1752,6 +1757,13 @@ document.addEventListener("alpine:init", () => {
 			this.pendingImages.splice(index, 1);
 		},
 
+		isThreadNearBottom(threshold = 80) {
+			const el = this.$refs.thread;
+			if (!el) return true;
+			const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+			return distFromBottom <= threshold;
+		},
+
 		handleThreadScroll() {
 			const el = this.$refs.thread;
 			if (!el) return;
@@ -1775,7 +1787,7 @@ document.addEventListener("alpine:init", () => {
 			// Only mark scrolled-up when the user actively scrolled upward
 			// by a meaningful amount (ignores content growing below and
 			// tiny accidental trackpad impulses)
-			if (prevTop !== undefined && el.scrollTop < prevTop - 10) {
+			if (typeof prevTop === "number" && el.scrollTop < prevTop - 10) {
 				this.userScrolledUp = true;
 			}
 		},
@@ -3143,6 +3155,7 @@ document.addEventListener("alpine:init", () => {
 			this.error = "";
 			this.isLoadingSession = false;
 			this.userScrolledUp = false;
+			this._prevScrollTop = null;
 			this.promptQueue = [];
 			this.toolCallPartById.clear();
 			this.usageAccountedMessageIds.clear();
@@ -3194,6 +3207,7 @@ document.addEventListener("alpine:init", () => {
 			this.error = "";
 			this.streamMessageId = "";
 			this.userScrolledUp = false;
+			this._prevScrollTop = null;
 			this.toolCallPartById.clear();
 			this.usageAccountedMessageIds.clear();
 			this.sessionStats = {
