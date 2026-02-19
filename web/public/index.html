@@ -31,6 +31,7 @@
       href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css"
     />
     <link rel="stylesheet" href="/css/style.css?v=20260218v43" />
+    <link rel="stylesheet" href="/css/review-panel.css?v=20260219v1" />
     <!-- Preload CDN scripts for faster initial render -->
     <link rel="preload" href="https://unpkg.com/htmx.org@1.9.12" as="script" />
     <link rel="preload" href="https://cdn.jsdelivr.net/npm/marked/marked.min.js" as="script" />
@@ -44,6 +45,7 @@
     <script src="/js/chat.js?v=20260218v20" defer></script>
     <script src="/js/config.js?v=20260211v" defer></script>
     <script src="/js/memory.js?v=20260211v" defer></script>
+    <script src="/js/review-panel.js?v=20260219v1" defer></script>
     <script src="/js/pull-to-refresh.js?v=20260218v" defer></script>
 
     <script src="https://unpkg.com/alpinejs@3.13.5/dist/cdn.min.js" defer></script>
@@ -75,10 +77,13 @@
             >
               Brain
             </button>
-            <a
+            <button
               class="nav-tab"
-              href="/review"
+              :class="{ active: view === 'review' }"
+              @click="setView('review')"
+              type="button"
               role="tab"
+              :aria-selected="view === 'review'"
             >
               Review
               <span
@@ -86,7 +91,7 @@
                 x-show="activeReviewCount > 0"
                 x-text="activeReviewCount"
               ></span>
-            </a>
+            </button>
             <button
               class="nav-tab nav-tab-icon theme-toggle"
               @click="toggleTheme()"
@@ -1002,6 +1007,126 @@
           </div>
         </section>
 
+
+        <section class="view review-view" x-show="view === 'review'" x-cloak role="tabpanel">
+          <div class="view-header">// review</div>
+          <div class="view-title">Git changes</div>
+          <div class="view-body" x-data="rhoReviewDashboard()" x-init="init()">
+            <div class="reviewdash">
+              <template x-if="loading && !gitStatus">
+                <div class="reviewdash-empty"><p class="text-muted">loading…</p></div>
+              </template>
+
+              <template x-if="!loading && error && !gitStatus">
+                <div class="reviewdash-empty">
+                  <p x-text="error"></p>
+                  <p class="text-muted">check that you're in a git repository</p>
+                </div>
+              </template>
+
+              <template x-if="!loading && !error && !gitStatus">
+                <div class="reviewdash-empty">
+                  <p>no git context detected</p>
+                  <p class="text-muted">run a git command to get started</p>
+                </div>
+              </template>
+
+              <template x-if="gitStatus">
+                <div class="reviewdash-main">
+                  <div class="reviewdash-scroll">
+                    <div class="reviewdash-branch">
+                      <span class="reviewdash-branch-icon">⎇</span>
+                      <span class="reviewdash-branch-name" x-text="gitStatus.branch"></span>
+                      <span class="reviewdash-sep">·</span>
+                      <span class="reviewdash-summary" x-text="fileSummary()"></span>
+                    </div>
+
+                    <template x-if="gitStatus.sessionFiles.length > 0">
+                      <div class="reviewdash-session-badge" x-text="gitStatus.sessionFiles.length + ' file' + (gitStatus.sessionFiles.length !== 1 ? 's' : '') + ' changed this session'"></div>
+                    </template>
+
+                    <template x-if="reviews.length > 0">
+                      <div class="reviewdash-section">
+                        <div class="reviewdash-section-title">active reviews</div>
+                        <template x-for="r in reviews" :key="r.id">
+                          <a class="reviewdash-review-row" :href="'/review/' + r.id + '?token=' + encodeURIComponent(r.token)">
+                            <span class="reviewdash-dot"></span>
+                            <span class="reviewdash-review-files" x-text="r.files.join(', ')"></span>
+                            <span class="text-muted" x-text="relativeTime(r.createdAt)"></span>
+                          </a>
+                        </template>
+                      </div>
+                    </template>
+
+                    <template x-if="gitStatus.files.length > 0">
+                      <div class="reviewdash-files">
+                        <template x-for="file in gitStatus.files" :key="file.path">
+                          <div class="reviewdash-entry">
+                            <div class="reviewdash-row" @click="toggleExpand(file.path)">
+                              <label class="reviewdash-check" @click.stop>
+                                <input type="checkbox" :checked="selected.includes(file.path)" @change="toggleSelect(file.path)">
+                              </label>
+                              <span class="reviewdash-status" :class="file.status" x-text="file.statusLabel"></span>
+                              <span class="reviewdash-path" x-text="file.path"></span>
+                              <template x-if="file.isSession">
+                                <span class="reviewdash-session-dot" title="Changed this session">●</span>
+                              </template>
+                              <span class="reviewdash-stats" x-show="file.additions || file.deletions">
+                                <span class="reviewdash-add" x-show="file.additions" x-text="'+' + file.additions"></span>
+                                <span class="reviewdash-del" x-show="file.deletions" x-text="'−' + file.deletions"></span>
+                              </span>
+                              <span class="reviewdash-chevron" x-text="expanded.includes(file.path) ? '▾' : '▸'"></span>
+                            </div>
+
+                            <div class="reviewdash-diff-wrap" x-show="expanded.includes(file.path)">
+                              <template x-if="diffs[file.path] === false">
+                                <div class="reviewdash-diff-loading">loading diff…</div>
+                              </template>
+                              <template x-if="diffs[file.path] === ''">
+                                <div class="reviewdash-diff-empty">no diff available</div>
+                              </template>
+                              <template x-if="diffs[file.path] && diffs[file.path] !== false">
+                                <div x-html="renderDiff(diffs[file.path])"></div>
+                              </template>
+                            </div>
+                          </div>
+                        </template>
+                      </div>
+                    </template>
+
+                    <template x-if="gitStatus.files.length === 0">
+                      <div class="reviewdash-empty">
+                        <p class="text-muted">working tree clean</p>
+                      </div>
+                    </template>
+
+                    <template x-if="gitStatus.log.length > 0">
+                      <div class="reviewdash-commits">
+                        <div class="reviewdash-section-title">recent commits</div>
+                        <template x-for="entry in gitStatus.log" :key="entry.hash">
+                          <div class="reviewdash-commit-row">
+                            <span class="reviewdash-commit-hash" x-text="entry.hash"></span>
+                            <span class="reviewdash-commit-msg" x-text="entry.message"></span>
+                          </div>
+                        </template>
+                      </div>
+                    </template>
+                  </div>
+
+                  <div class="reviewdash-actions" x-show="selected.length > 0">
+                    <span class="reviewdash-actions-count" x-text="selected.length + ' file' + (selected.length !== 1 ? 's' : '')"></span>
+                    <div class="reviewdash-actions-row">
+                      <button class="reviewdash-btn" @click="selectAll()">
+                        <span x-text="selected.length === (gitStatus?.files?.filter(f => f.status !== 'deleted').length ?? 0) ? 'None' : 'All'"></span>
+                      </button>
+                      <button class="reviewdash-btn primary" @click="startReview()">Review →</button>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </section>
 
       </main>
 

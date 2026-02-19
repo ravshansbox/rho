@@ -1,7 +1,9 @@
+import { execFile as execFileCb } from "node:child_process";
 import crypto from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { createNodeWebSocket } from "@hono/node-ws";
 import type { Context } from "hono";
@@ -360,19 +362,8 @@ app.delete("/api/review/sessions/:id", (c) => {
 	return c.json({ ok: true });
 });
 
-app.get("/review", async (c) => {
-	try {
-		const html = await readFile(
-			path.join(publicDir, "review", "lobby.html"),
-			"utf-8",
-		);
-		return c.html(html);
-	} catch (error) {
-		return c.text(
-			(error as Error).message ?? "Failed to load review lobby",
-			500,
-		);
-	}
+app.get("/review", (c) => {
+	return c.redirect("/?view=review", 302);
 });
 
 app.get("/review/:id", async (c) => {
@@ -518,6 +509,305 @@ app.get(
 		};
 	}),
 );
+
+// --- Git API ---
+
+const execFileAsync = promisify(execFileCb);
+
+interface GitContextFile {
+	cwd: string;
+	updatedAt: number;
+	sessionFiles: string[];
+}
+
+async function readGitContext(): Promise<GitContextFile | null> {
+	try {
+		const raw = await readFile(
+			path.join(getRhoHome(), "git-context.json"),
+			"utf-8",
+		);
+		return JSON.parse(raw);
+	} catch {
+		return null;
+	}
+}
+
+async function getGitCwd(): Promise<string | null> {
+	const ctx = await readGitContext();
+	if (ctx?.cwd) {
+		try {
+			await execFileAsync("git", ["rev-parse", "--git-dir"], {
+				cwd: ctx.cwd,
+				timeout: 2000,
+			});
+			return ctx.cwd;
+		} catch {
+			/* not a git repo anymore */
+		}
+	}
+	try {
+		await execFileAsync("git", ["rev-parse", "--git-dir"], {
+			cwd: process.cwd(),
+			timeout: 2000,
+		});
+		return process.cwd();
+	} catch {
+		return null;
+	}
+}
+
+async function gitExec(args: string[], cwd: string): Promise<string> {
+	const { stdout } = await execFileAsync("git", args, {
+		cwd,
+		timeout: 10000,
+		maxBuffer: 10 * 1024 * 1024,
+	});
+	return stdout;
+}
+
+interface GitStatusFile {
+	path: string;
+	index: string;
+	worktree: string;
+	status: string;
+	statusLabel: string;
+	additions: number;
+	deletions: number;
+	isSession: boolean;
+}
+
+function parseStatusLine(
+	line: string,
+): { index: string; worktree: string; path: string } | null {
+	if (line.length < 4) return null;
+	const index = line[0];
+	const worktree = line[1];
+	let filePath = line.slice(3);
+	const renameIdx = filePath.indexOf(" -> ");
+	if (renameIdx !== -1) filePath = filePath.slice(renameIdx + 4);
+	return { index, worktree, path: filePath };
+}
+
+function classifyFile(
+	index: string,
+	worktree: string,
+): { status: string; statusLabel: string } {
+	if (index === "?" && worktree === "?")
+		return { status: "untracked", statusLabel: "?" };
+	if (index === "A") return { status: "added", statusLabel: "A" };
+	if (index === "D" || worktree === "D")
+		return { status: "deleted", statusLabel: "D" };
+	if (index === "R") return { status: "renamed", statusLabel: "R" };
+	return { status: "modified", statusLabel: "M" };
+}
+
+function parseNumstat(
+	output: string,
+): Map<string, { add: number; del: number }> {
+	const map = new Map<string, { add: number; del: number }>();
+	for (const line of output.trim().split("\n")) {
+		if (!line) continue;
+		const parts = line.split("\t");
+		if (parts.length >= 3) {
+			const add = parts[0] === "-" ? 0 : parseInt(parts[0]) || 0;
+			const del = parts[1] === "-" ? 0 : parseInt(parts[1]) || 0;
+			map.set(parts[2], { add, del });
+		}
+	}
+	return map;
+}
+
+const GIT_LANG_MAP: Record<string, string> = {
+	".ts": "typescript",
+	".tsx": "typescript",
+	".js": "javascript",
+	".jsx": "javascript",
+	".mjs": "javascript",
+	".py": "python",
+	".rs": "rust",
+	".go": "go",
+	".css": "css",
+	".html": "html",
+	".json": "json",
+	".yaml": "yaml",
+	".yml": "yaml",
+	".sh": "bash",
+	".md": "markdown",
+	".toml": "toml",
+};
+
+function detectLang(filePath: string): string {
+	return GIT_LANG_MAP[path.extname(filePath).toLowerCase()] ?? "plaintext";
+}
+
+app.get("/api/git/status", async (c) => {
+	const cwd = await getGitCwd();
+	if (!cwd) return c.json({ error: "No git repository detected" }, 404);
+
+	const ctx = await readGitContext();
+	const sessionFiles = new Set(ctx?.sessionFiles ?? []);
+
+	try {
+		const [branch, porcelain, numstatRaw, cachedNumstatRaw, logRaw] =
+			await Promise.all([
+				gitExec(["rev-parse", "--abbrev-ref", "HEAD"], cwd).catch(() => "HEAD"),
+				gitExec(["status", "--porcelain=v1"], cwd).catch(() => ""),
+				gitExec(["diff", "--numstat"], cwd).catch(() => ""),
+				gitExec(["diff", "--cached", "--numstat"], cwd).catch(() => ""),
+				gitExec(["log", "--oneline", "--format=%h\t%s", "-10"], cwd).catch(
+					() => "",
+				),
+			]);
+
+		const numstat = parseNumstat(numstatRaw);
+		const cachedNumstat = parseNumstat(cachedNumstatRaw);
+
+		const files: GitStatusFile[] = [];
+		for (const line of porcelain.split("\n")) {
+			const parsed = parseStatusLine(line);
+			if (!parsed) continue;
+
+			const { status, statusLabel } = classifyFile(
+				parsed.index,
+				parsed.worktree,
+			);
+			const stats = numstat.get(parsed.path) ??
+				cachedNumstat.get(parsed.path) ?? { add: 0, del: 0 };
+
+			files.push({
+				path: parsed.path,
+				index: parsed.index,
+				worktree: parsed.worktree,
+				status,
+				statusLabel,
+				additions: stats.add,
+				deletions: stats.del,
+				isSession: sessionFiles.has(parsed.path),
+			});
+		}
+
+		const log = logRaw
+			.trim()
+			.split("\n")
+			.filter(Boolean)
+			.map((l) => {
+				const [hash, ...rest] = l.split("\t");
+				return { hash, message: rest.join("\t") };
+			});
+
+		return c.json({
+			cwd,
+			branch: branch.trim(),
+			files,
+			log,
+			sessionFiles: [...sessionFiles],
+		});
+	} catch (err) {
+		return c.json({ error: (err as Error).message }, 500);
+	}
+});
+
+app.get("/api/git/diff", async (c) => {
+	const cwd = await getGitCwd();
+	if (!cwd) return c.json({ error: "No git repository" }, 404);
+
+	const file = c.req.query("file");
+	if (!file) return c.json({ error: "file parameter required" }, 400);
+	if (file.includes("..")) return c.json({ error: "Invalid path" }, 400);
+
+	try {
+		// Try unstaged
+		const unstaged = await gitExec(["diff", "--", file], cwd);
+		if (unstaged.trim()) return c.text(unstaged);
+
+		// Try staged
+		const staged = await gitExec(["diff", "--cached", "--", file], cwd);
+		if (staged.trim()) return c.text(staged);
+
+		// Untracked / new: synthetic full-add diff
+		const abs = path.join(cwd, file);
+		const content = await readFile(abs, "utf-8");
+		const lines = content.split("\n");
+		let diff = `--- /dev/null\n+++ b/${file}\n`;
+		diff += `@@ -0,0 +1,${lines.length} @@\n`;
+		diff += lines.map((l) => `+${l}`).join("\n");
+		return c.text(diff);
+	} catch (err) {
+		return c.json({ error: (err as Error).message }, 500);
+	}
+});
+
+app.post("/api/review/from-git", async (c) => {
+	const cwd = await getGitCwd();
+	if (!cwd) return c.json({ error: "No git repository" }, 404);
+
+	let body: { files?: string[]; message?: string };
+	try {
+		body = await c.req.json();
+	} catch {
+		return c.json({ error: "Invalid JSON" }, 400);
+	}
+
+	const filePaths = Array.isArray(body.files) ? body.files : [];
+	if (filePaths.length === 0)
+		return c.json({ error: "No files specified" }, 400);
+
+	const reviewFiles: ReviewFile[] = [];
+	const warnings: string[] = [];
+
+	for (const fp of filePaths) {
+		if (fp.includes("..")) {
+			warnings.push(`Skipped: ${fp} (path traversal)`);
+			continue;
+		}
+		const abs = path.join(cwd, fp);
+		try {
+			const content = await readFile(abs, "utf-8");
+			reviewFiles.push({
+				path: abs,
+				relativePath: fp,
+				content,
+				language: detectLang(fp),
+			});
+		} catch (err) {
+			warnings.push(`Skipped: ${fp} (${(err as Error).message})`);
+		}
+	}
+
+	if (reviewFiles.length === 0)
+		return c.json({ error: "No readable files" }, 400);
+
+	const id = crypto.randomUUID();
+	const token = crypto.randomUUID().replace(/-/g, "");
+	const session: ReviewSession = {
+		id,
+		token,
+		files: reviewFiles,
+		warnings,
+		message: typeof body.message === "string" ? body.message : undefined,
+		createdAt: Date.now(),
+		done: false,
+		result: null,
+		toolSockets: new Set(),
+		uiSockets: new Set(),
+	};
+
+	reviewSessions.set(id, session);
+
+	setTimeout(
+		() => {
+			const s = reviewSessions.get(id);
+			if (s && Date.now() - s.createdAt > 2 * 60 * 60 * 1000) {
+				reviewSessions.delete(id);
+			}
+		},
+		2 * 60 * 60 * 1000,
+	).unref?.();
+
+	const origin = new URL(c.req.url).origin;
+	const url = `${origin}/review/${id}?token=${token}`;
+	return c.json({ id, token, url });
+});
 
 // --- Config API ---
 

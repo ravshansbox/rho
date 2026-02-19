@@ -1,0 +1,220 @@
+function rhoReviewDashboard() {
+	return {
+		loading: true,
+		gitStatus: null,
+		selected: [],
+		expanded: [],
+		diffs: {},
+		reviews: [],
+		error: null,
+		_timer: null,
+
+		async init() {
+			await this.refresh();
+			this.loading = false;
+			this._timer = setInterval(() => this.refresh(), 15000);
+		},
+
+		destroy() {
+			if (this._timer) clearInterval(this._timer);
+		},
+
+		async refresh() {
+			try {
+				const [statusRes, reviewsRes] = await Promise.all([
+					fetch("/api/git/status"),
+					fetch("/api/review/sessions"),
+				]);
+
+				if (statusRes.ok) {
+					const data = await statusRes.json();
+					if (data.error) {
+						this.error = data.error;
+						this.gitStatus = null;
+					} else {
+						this.gitStatus = data;
+						this.error = null;
+					}
+				} else if (statusRes.status === 404) {
+					this.gitStatus = null;
+					this.error = null;
+				} else {
+					this.error = "Failed to fetch git status";
+				}
+
+				if (reviewsRes.ok) {
+					const data = await reviewsRes.json();
+					this.reviews = data.filter((r) => !r.done);
+				}
+			} catch {
+				// keep current state
+			}
+		},
+
+		fileSummary() {
+			if (!this.gitStatus) return "";
+			const n = this.gitStatus.files.length;
+			const totals = this.gitStatus.files.reduce(
+				(acc, f) => ({
+					add: acc.add + (f.additions || 0),
+					del: acc.del + (f.deletions || 0),
+				}),
+				{ add: 0, del: 0 },
+			);
+			let s = n + " file" + (n !== 1 ? "s" : "");
+			if (totals.add) s += " +" + totals.add;
+			if (totals.del) s += " −" + totals.del;
+			return s;
+		},
+
+		toggleSelect(path) {
+			const i = this.selected.indexOf(path);
+			if (i >= 0) this.selected.splice(i, 1);
+			else this.selected.push(path);
+		},
+
+		selectAll() {
+			if (!this.gitStatus) return;
+			const allPaths = this.gitStatus.files
+				.filter((f) => f.status !== "deleted")
+				.map((f) => f.path);
+			if (this.selected.length === allPaths.length) this.selected = [];
+			else this.selected = [...allPaths];
+		},
+
+		toggleExpand(path) {
+			const i = this.expanded.indexOf(path);
+			if (i >= 0) this.expanded.splice(i, 1);
+			else {
+				this.expanded.push(path);
+				if (this.diffs[path] === undefined) this.loadDiff(path);
+			}
+		},
+
+		async loadDiff(path) {
+			this.diffs = { ...this.diffs, [path]: false };
+			try {
+				const res = await fetch(
+					"/api/git/diff?file=" + encodeURIComponent(path),
+				);
+				const text = res.ok ? await res.text() : "";
+				this.diffs = { ...this.diffs, [path]: text || "" };
+			} catch {
+				this.diffs = { ...this.diffs, [path]: "" };
+			}
+		},
+
+		async startReview() {
+			if (this.selected.length === 0) return;
+			try {
+				const res = await fetch("/api/review/from-git", {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ files: this.selected }),
+				});
+				if (res.ok) {
+					const data = await res.json();
+					window.location.href = data.url;
+				}
+			} catch {
+				// ignore
+			}
+		},
+
+		relativeTime(ts) {
+			const diff = Date.now() - ts;
+			if (diff < 60000) return "just now";
+			if (diff < 3600000) return Math.floor(diff / 60000) + "m ago";
+			if (diff < 86400000) return Math.floor(diff / 3600000) + "h ago";
+			return Math.floor(diff / 86400000) + "d ago";
+		},
+
+		renderDiff(diffText) {
+			return renderReviewDashDiff(diffText);
+		},
+	};
+}
+
+function renderReviewDashDiff(text) {
+	const hunks = parseReviewDashDiff(text || "");
+	if (hunks.length === 0)
+		return '<div class="reviewdash-diff-empty">no changes</div>';
+	let html = "";
+	for (const hunk of hunks) {
+		html +=
+			'<div class="reviewdash-diff-hunk">' + escapeHtml(hunk.header) + "</div>";
+		for (const line of hunk.lines) {
+			const cls =
+				line.type === "add" ? "add" : line.type === "del" ? "del" : "ctx";
+			const sign =
+				line.type === "add" ? "+" : line.type === "del" ? "−" : "&nbsp;";
+			html += '<div class="reviewdash-diff-line ' + cls + '">';
+			html += '<span class="reviewdash-ln">' + (line.old ?? "") + "</span>";
+			html += '<span class="reviewdash-ln">' + (line.new ?? "") + "</span>";
+			html += '<span class="reviewdash-sign">' + sign + "</span>";
+			html +=
+				'<span class="reviewdash-text">' + escapeHtml(line.text) + "</span>";
+			html += "</div>";
+		}
+	}
+	return html;
+}
+
+function parseReviewDashDiff(text) {
+	const out = [];
+	const lines = text.split("\n");
+	let i = 0;
+	while (i < lines.length && !lines[i].startsWith("@@")) i++;
+	while (i < lines.length) {
+		const m = lines[i].match(
+			/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@\s?(.*)/,
+		);
+		if (!m) {
+			i++;
+			continue;
+		}
+		const header = m[5] || `@@ -${m[1]},${m[2] || 1} +${m[3]},${m[4] || 1} @@`;
+		let oldNum = parseInt(m[1], 10);
+		let newNum = parseInt(m[3], 10);
+		const hunk = { header, lines: [] };
+		i++;
+		while (i < lines.length && !lines[i].startsWith("@@")) {
+			const l = lines[i];
+			if (l.startsWith("+"))
+				hunk.lines.push({
+					type: "add",
+					old: null,
+					new: newNum++,
+					text: l.slice(1),
+				});
+			else if (l.startsWith("-"))
+				hunk.lines.push({
+					type: "del",
+					old: oldNum++,
+					new: null,
+					text: l.slice(1),
+				});
+			else if (l.startsWith("\\")) {
+				// skip
+			} else {
+				hunk.lines.push({
+					type: "ctx",
+					old: oldNum++,
+					new: newNum++,
+					text: l.startsWith(" ") ? l.slice(1) : l,
+				});
+			}
+			i++;
+		}
+		out.push(hunk);
+	}
+	return out;
+}
+
+function escapeHtml(s) {
+	return (s || "")
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;");
+}
