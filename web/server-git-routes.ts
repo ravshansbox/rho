@@ -46,12 +46,16 @@ function startGitContextWatch(): void {
 	const contextFile = "git-context.json";
 	try {
 		mkdirSync(rhoHome, { recursive: true });
-		const watcher = watch(rhoHome, (_eventType, filename) => {
-			const fileName =
-				typeof filename === "string" ? filename : filename?.toString();
-			if (!fileName || fileName !== contextFile) return;
-			scheduleGitContextNotify();
-		});
+		const watcher = watch(
+			rhoHome,
+			{ persistent: false },
+			(_eventType, filename) => {
+				const fileName =
+					typeof filename === "string" ? filename : filename?.toString();
+				if (!fileName || fileName !== contextFile) return;
+				scheduleGitContextNotify();
+			},
+		);
 		watcher.on("error", () => {
 			// Best effort only; polling fallback remains available.
 		});
