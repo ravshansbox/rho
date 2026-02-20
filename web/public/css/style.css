@@ -553,6 +553,31 @@ button {
 	color: var(--yellow);
 }
 
+.chat-session-badge.status.status-streaming {
+	border-color: var(--green);
+	color: var(--green);
+}
+
+.chat-session-badge.status.status-starting {
+	border-color: var(--cyan);
+	color: var(--cyan);
+}
+
+.chat-session-badge.status.status-error {
+	border-color: var(--red);
+	color: var(--red);
+}
+
+.chat-session-badge.status.status-idle {
+	border-color: var(--border-bright);
+	color: var(--text-muted);
+}
+
+.chat-session-badge.unread {
+	border-color: var(--green);
+	color: var(--green);
+}
+
 /* ---- Config view ---- */
 
 .config-layout {

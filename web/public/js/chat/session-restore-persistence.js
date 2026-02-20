@@ -1,0 +1,341 @@
+import { fetchJson } from "./rendering-and-usage.js";
+
+const SESSION_RESTORE_STORAGE_KEY = "rho-chat-restore-v1";
+const SESSION_RESTORE_VERSION = 1;
+const SESSION_RESTORE_DRAFT_DEBOUNCE_MS = 220;
+
+function normalizeSessionId(value) {
+	if (typeof value !== "string") {
+		return "";
+	}
+	return value.trim();
+}
+
+function normalizeDrafts(input) {
+	if (!input || typeof input !== "object" || Array.isArray(input)) {
+		return null;
+	}
+	const drafts = {};
+	for (const [rawSessionId, rawDraft] of Object.entries(input)) {
+		const sessionId = normalizeSessionId(rawSessionId);
+		if (!sessionId || typeof rawDraft !== "string") {
+			continue;
+		}
+		drafts[sessionId] = rawDraft;
+	}
+	return drafts;
+}
+
+function uniqueSessionIds(ids) {
+	const seen = new Set();
+	const unique = [];
+	for (const rawId of ids) {
+		const sessionId = normalizeSessionId(rawId);
+		if (!sessionId || seen.has(sessionId)) {
+			continue;
+		}
+		seen.add(sessionId);
+		unique.push(sessionId);
+	}
+	return unique;
+}
+
+function normalizeSavedAt(value) {
+	const parsed = Number(value);
+	if (Number.isFinite(parsed) && parsed > 0) {
+		return parsed;
+	}
+	return Date.now();
+}
+
+function hasReplayablePending(state) {
+	if (!state || typeof state !== "object") {
+		return false;
+	}
+	if (state.pendingRpcCommands instanceof Map) {
+		return state.pendingRpcCommands.size > 0;
+	}
+	return false;
+}
+
+function isRuntimeActiveState(state) {
+	if (!state || typeof state !== "object") {
+		return false;
+	}
+	const rpcSessionId = normalizeSessionId(state.rpcSessionId);
+	if (rpcSessionId) {
+		return true;
+	}
+	if (state.status === "starting" || state.status === "streaming") {
+		return true;
+	}
+	if (Boolean(state.isStreaming) || Boolean(state.isSendingPrompt)) {
+		return true;
+	}
+	if (hasReplayablePending(state)) {
+		return true;
+	}
+	return false;
+}
+
+function buildPersistedRestorePayload(vm, savedAt = Date.now()) {
+	const focusedSessionId =
+		normalizeSessionId(vm?.focusedSessionId) ||
+		normalizeSessionId(vm?.activeSessionId);
+	const activeSessionIds = [];
+	const drafts = {};
+
+	if (vm?.sessionStateById instanceof Map) {
+		for (const [rawSessionId, state] of vm.sessionStateById.entries()) {
+			const sessionId = normalizeSessionId(rawSessionId);
+			if (!sessionId || !state || typeof state !== "object") {
+				continue;
+			}
+			if (isRuntimeActiveState(state)) {
+				activeSessionIds.push(sessionId);
+			}
+			if (typeof state.promptText === "string" && state.promptText.length > 0) {
+				drafts[sessionId] = state.promptText;
+			}
+		}
+	}
+
+	return {
+		version: SESSION_RESTORE_VERSION,
+		focusedSessionId: focusedSessionId || null,
+		activeSessionIds: uniqueSessionIds(activeSessionIds),
+		drafts,
+		savedAt: normalizeSavedAt(savedAt),
+	};
+}
+
+function normalizePersistedRestorePayload(input) {
+	if (!input || typeof input !== "object" || Array.isArray(input)) {
+		return null;
+	}
+
+	if (input.version !== SESSION_RESTORE_VERSION) {
+		return null;
+	}
+	if (!Array.isArray(input.activeSessionIds)) {
+		return null;
+	}
+
+	const drafts = normalizeDrafts(input.drafts ?? {});
+	if (!drafts) {
+		return null;
+	}
+
+	const focused = normalizeSessionId(input.focusedSessionId);
+	return {
+		version: SESSION_RESTORE_VERSION,
+		focusedSessionId: focused || null,
+		activeSessionIds: uniqueSessionIds(input.activeSessionIds),
+		drafts,
+		savedAt: normalizeSavedAt(input.savedAt),
+	};
+}
+
+function parsePersistedRestorePayload(rawValue) {
+	if (typeof rawValue !== "string" || rawValue.length === 0) {
+		return null;
+	}
+	try {
+		const parsed = JSON.parse(rawValue);
+		return normalizePersistedRestorePayload(parsed);
+	} catch {
+		return null;
+	}
+}
+
+function restoreStorage() {
+	if (typeof localStorage === "undefined") {
+		return null;
+	}
+	if (
+		typeof localStorage.getItem !== "function" ||
+		typeof localStorage.setItem !== "function"
+	) {
+		return null;
+	}
+	return localStorage;
+}
+
+function formatRestoreFailure(error) {
+	const message =
+		error instanceof Error
+			? error.message
+			: typeof error === "string"
+				? error
+				: "unknown restore error";
+	return `Failed to restore session: ${message}`;
+}
+
+export const rhoChatSessionRestoreMethods = {
+	sessionRestoreStorageKey: SESSION_RESTORE_STORAGE_KEY,
+	sessionRestoreDraftDebounceMs: SESSION_RESTORE_DRAFT_DEBOUNCE_MS,
+	persistedRestoreTimer: null,
+	isRestoringPersistedSessionState: false,
+
+	preparePersistedRestoreSnapshot(hashSessionId = "") {
+		const storage = restoreStorage();
+		if (!storage) {
+			return null;
+		}
+
+		const raw = storage.getItem(this.sessionRestoreStorageKey);
+		const snapshot = parsePersistedRestorePayload(raw);
+		if (!snapshot) {
+			return null;
+		}
+
+		if (
+			normalizeSessionId(hashSessionId) ||
+			!normalizeSessionId(snapshot.focusedSessionId)
+		) {
+			return snapshot;
+		}
+
+		this.isRestoringPersistedSessionState = true;
+		try {
+			this.activeSessionId = snapshot.focusedSessionId;
+		} finally {
+			this.isRestoringPersistedSessionState = false;
+		}
+
+		return snapshot;
+	},
+
+	persistSessionRestoreSnapshot() {
+		if (this.isRestoringPersistedSessionState) {
+			return;
+		}
+		const storage = restoreStorage();
+		if (!storage) {
+			return;
+		}
+
+		const payload = buildPersistedRestorePayload(this);
+		try {
+			storage.setItem(this.sessionRestoreStorageKey, JSON.stringify(payload));
+		} catch {
+			// Ignore localStorage write failures.
+		}
+	},
+
+	schedulePersistSessionRestoreSnapshot() {
+		if (this.isRestoringPersistedSessionState) {
+			return;
+		}
+		if (this.persistedRestoreTimer) {
+			clearTimeout(this.persistedRestoreTimer);
+			this.persistedRestoreTimer = null;
+		}
+		const delay = Number(this.sessionRestoreDraftDebounceMs);
+		const debounceMs =
+			Number.isFinite(delay) && delay >= 0
+				? delay
+				: SESSION_RESTORE_DRAFT_DEBOUNCE_MS;
+		this.persistedRestoreTimer = setTimeout(() => {
+			this.persistedRestoreTimer = null;
+			this.persistSessionRestoreSnapshot();
+		}, debounceMs);
+	},
+
+	clearPersistedRestoreTimer() {
+		if (!this.persistedRestoreTimer) {
+			return;
+		}
+		clearTimeout(this.persistedRestoreTimer);
+		this.persistedRestoreTimer = null;
+	},
+
+	async resolveSessionFileForRestore(sessionId) {
+		const normalizedId = normalizeSessionId(sessionId);
+		if (!normalizedId) {
+			return "";
+		}
+		const knownState = this.ensureSessionState(normalizedId);
+		if (typeof knownState?.sessionFile === "string" && knownState.sessionFile) {
+			return knownState.sessionFile;
+		}
+
+		if (typeof this.getSessionFile === "function") {
+			const knownFile = this.getSessionFile(normalizedId);
+			if (typeof knownFile === "string" && knownFile.trim()) {
+				this.ensureSessionState(normalizedId, { sessionFile: knownFile });
+				return knownFile;
+			}
+		}
+
+		const session = await fetchJson(`/api/sessions/${normalizedId}`);
+		const sessionFile =
+			typeof session?.file === "string" ? session.file.trim() : "";
+		if (!sessionFile) {
+			throw new Error("session file unavailable");
+		}
+		this.ensureSessionState(normalizedId, {
+			sessionFile,
+			activeSession: session,
+		});
+		return sessionFile;
+	},
+
+	async restorePersistedSessionRuntime(snapshot) {
+		const normalized = normalizePersistedRestorePayload(snapshot);
+		if (!normalized) {
+			return;
+		}
+
+		this.isRestoringPersistedSessionState = true;
+		try {
+			for (const [sessionId, draft] of Object.entries(normalized.drafts)) {
+				const state = this.ensureSessionState(sessionId);
+				if (!state) {
+					continue;
+				}
+				state.promptText = draft;
+			}
+
+			for (const sessionId of normalized.activeSessionIds) {
+				const state = this.ensureSessionState(sessionId);
+				if (!state) {
+					continue;
+				}
+				if (
+					normalizeSessionId(state.rpcSessionId) ||
+					state.status === "starting"
+				) {
+					continue;
+				}
+				try {
+					const sessionFile =
+						await this.resolveSessionFileForRestore(sessionId);
+					if (!sessionFile) {
+						throw new Error("session file unavailable");
+					}
+					if (typeof this.startRpcSession === "function") {
+						this.startRpcSession(sessionFile, { sessionId });
+					}
+				} catch (error) {
+					state.status = "error";
+					state.error = formatRestoreFailure(error);
+					state.lastActivityAt = Date.now();
+				}
+			}
+		} finally {
+			this.isRestoringPersistedSessionState = false;
+		}
+
+		this.persistSessionRestoreSnapshot();
+	},
+};
+
+export {
+	SESSION_RESTORE_STORAGE_KEY,
+	SESSION_RESTORE_VERSION,
+	buildPersistedRestorePayload,
+	parsePersistedRestorePayload,
+	normalizePersistedRestorePayload,
+	isRuntimeActiveState,
+};

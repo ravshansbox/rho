@@ -126,7 +126,7 @@
                 </div>
                 <div class="chat-section-meta chat-error" x-show="error" x-text="error"></div>
                 <div class="chat-list" @scroll="onSessionsScroll($event)">
-                  <template x-for="session in sessions" :key="session.id">
+                  <template x-for="session in orderedSessions()" :key="session.id">
                     <button
                       class="chat-session"
                       :class="{ active: session.id === activeSessionId }"
@@ -138,6 +138,16 @@
                       <div class="chat-session-meta">
                         <span x-text="formatTimestampShort(session.timestamp)"></span>
                         <span x-text="messageCountLabel(session)"></span>
+                        <span
+                          class="chat-session-badge status"
+                          :class="'status-' + sessionRowStatus(session)"
+                          x-show="sessionStatusBadge(session)"
+                          x-text="sessionStatusBadge(session)"
+                        ></span>
+                        <span
+                          class="chat-session-badge unread"
+                          x-show="sessionRowUnread(session)"
+                        >new</span>
                         <span
                           class="chat-session-badge fork"
                           x-show="sessionForkBadge(session)"
@@ -1150,6 +1160,7 @@
 
       <footer class="footer">
         <div class="footer-inner">
+          <span class="footer-project">project: --</span>
           <span class="footer-tokens">tokens: --</span>
           <span class="footer-cost">cost: --</span>
           <span class="footer-status">status: idle</span>

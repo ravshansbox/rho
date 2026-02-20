@@ -1,6 +1,11 @@
 import * as primitives from "./constants-and-primitives.js";
 import * as modelThinking from "./model-thinking-and-toast.js";
 import * as renderingUsage from "./rendering-and-usage.js";
+import {
+	getSessionRowMeta,
+	sessionStatusBadgeText,
+	sortSessionsForSidebar,
+} from "./session-list-ordering.js";
 import * as toolSemantics from "./tool-semantics.js";
 
 const {
@@ -201,7 +206,10 @@ export const rhoChatSessionUiMethods = {
 			this.isPageVisible = !document.hidden;
 			if (document.hidden) {
 				this.stopPolling();
-			} else if (!this.isIdle) {
+				return;
+			}
+			this.refreshGitProject();
+			if (!this.isIdle) {
 				// Resume polling when tab becomes visible (if not idle)
 				this.loadSessions(false); // Fetch immediately
 				this.startPolling();
@@ -220,6 +228,9 @@ export const rhoChatSessionUiMethods = {
 			const name = event?.detail?.name;
 			if (name === "sessions_changed" && this.isChatViewVisible()) {
 				this.loadSessions(false);
+			}
+			if (name === "git_context_changed") {
+				this.refreshGitProject();
 			}
 		};
 		window.addEventListener("rho:ui-event", handleSessionsChanged);
@@ -312,6 +323,26 @@ export const rhoChatSessionUiMethods = {
 		this.showSessionsPanel = !this.showSessionsPanel;
 	},
 
+	orderedSessions() {
+		return sortSessionsForSidebar(this.sessions, this.sessionStateById);
+	},
+
+	sessionRowMeta(session) {
+		return getSessionRowMeta(session, this.sessionStateById);
+	},
+
+	sessionRowStatus(session) {
+		return this.sessionRowMeta(session).status;
+	},
+
+	sessionRowUnread(session) {
+		return this.sessionRowMeta(session).unreadMilestone;
+	},
+
+	sessionStatusBadge(session) {
+		return sessionStatusBadgeText(this.sessionRowMeta(session));
+	},
+
 	resetSlashCommandsCache() {
 		this.slashCommands = [];
 		this.slashCommandIndex = new Map();
@@ -376,37 +407,17 @@ export const rhoChatSessionUiMethods = {
 		}
 
 		const updateHash = options.updateHash !== false;
+		const targetSessionFile =
+			typeof options.sessionFile === "string" ? options.sessionFile : "";
+		const targetState = this.ensureSessionState(sessionId, {
+			sessionFile: targetSessionFile,
+		});
 
 		this.activeSessionId = sessionId;
 		this.isLoadingSession = true;
 		this.error = "";
-		this.streamMessageId = "";
 		this.userScrolledUp = false;
 		this._prevScrollTop = null;
-		this.toolCallPartById.clear();
-		this.usageAccountedMessageIds.clear();
-		this.sessionStats = {
-			tokens: 0,
-			cost: 0,
-			inputTokens: 0,
-			outputTokens: 0,
-			cacheRead: 0,
-			cacheWrite: 0,
-		};
-		this.updateFooter();
-
-		// Clear stale RPC when switching sessions
-		this.activeRpcSessionId = "";
-		this.activeRpcSessionFile = "";
-		this.lastRpcEventSeq = 0;
-		this.recoveringRpcSession = false;
-		this.replayingPendingRpc = false;
-		this.pendingRpcCommands.clear();
-		this.resetSlashCommandsCache();
-		this.showReconnectBanner = false;
-		this.reconnectBannerMessage = "";
-		this.streamDisconnectedDuringResponse = false;
-		this.awaitingStreamReconnectState = false;
 
 		// Persist in URL for refresh/back (optional)
 		if (updateHash && window.location.hash !== `#${sessionId}`) {
@@ -421,15 +432,34 @@ export const rhoChatSessionUiMethods = {
 				options.session ?? (await fetchJson(`/api/sessions/${sessionId}`));
 			this.applySession(session);
 
-			// Auto-start RPC so the session is immediately usable (not read-only)
 			const sessionFile =
-				options.sessionFile || session.file || this.getSessionFile(sessionId);
-			if (sessionFile) {
-				this.activeRpcSessionFile = sessionFile;
-				this.startRpcSession(sessionFile);
-			} else {
-				this.isForking = false;
+				targetSessionFile ||
+				session.file ||
+				this.getSessionFile(sessionId) ||
+				targetState?.sessionFile ||
+				"";
+			this.ensureSessionState(sessionId, {
+				activeSession: session,
+				sessionFile,
+			});
+
+			if (this.activeRpcSessionId) {
+				if (sessionFile) {
+					this.activeRpcSessionFile = sessionFile;
+				}
+				this.requestState();
+				this.requestAvailableModels();
+				this.requestSlashCommands();
+				return;
 			}
+
+			if (!sessionFile) {
+				this.isForking = false;
+				return;
+			}
+
+			this.activeRpcSessionFile = sessionFile;
+			this.startRpcSession(sessionFile);
 		} catch (error) {
 			this.error = error.message ?? "Failed to load session";
 		} finally {

@@ -37,12 +37,21 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 type Listener = (event?: unknown) => void;
 
+type SessionState = {
+	rpcSessionId: string;
+	sessionFile: string;
+	lastEventSeq: number;
+	recoveringRpcSession: boolean;
+	pendingRpcCommands: Map<string, { payload: unknown; queuedAt: number }>;
+};
+
 interface ChatVm extends Record<string, unknown> {
 	activeSessionId: string;
 	activeRpcSessionId: string;
 	activeRpcSessionFile: string;
 	lastRpcEventSeq: number;
 	sessions: unknown[];
+	sessionStateById: Map<string, SessionState>;
 	isSendingPrompt: boolean;
 	awaitingStreamReconnectState: boolean;
 	streamDisconnectedDuringResponse: boolean;
@@ -52,11 +61,18 @@ interface ChatVm extends Record<string, unknown> {
 	manualReconnect: () => void;
 	handleStateUpdate: (state: Record<string, unknown>) => void;
 	handleWsMessage: (event: { data: string }) => void;
+	ensureSessionState: (
+		sessionId: string,
+		meta?: Record<string, unknown>,
+	) => SessionState | null;
 	selectSession: (
 		sessionId: string,
 		options?: Record<string, unknown>,
 	) => Promise<void>;
-	startRpcSession: (sessionFile: string) => void;
+	startRpcSession: (
+		sessionFile: string,
+		options?: Record<string, unknown>,
+	) => void;
 }
 
 class MockWebSocket {
@@ -448,6 +464,189 @@ console.log(
 	);
 }
 
+console.log(
+	"\n-- reconnect resumes/replays both focused and background sessions --",
+);
+{
+	const chat = await loadChatVm();
+	const stateA = chat.ensureSessionState("sess-a", {
+		rpcSessionId: "rpc-a",
+		sessionFile: "/tmp/sess-a.jsonl",
+		lastEventSeq: 5,
+	});
+	const stateB = chat.ensureSessionState("sess-b", {
+		rpcSessionId: "rpc-b",
+		sessionFile: "/tmp/sess-b.jsonl",
+		lastEventSeq: 9,
+	});
+	if (!stateA || !stateB) {
+		throw new Error("expected session states for reconnect fixtures");
+	}
+	chat.activeSessionId = "sess-a";
+
+	chat.connectWebSocket();
+	const ws1 = MockWebSocket.instances[0];
+	if (!ws1) {
+		throw new Error("expected websocket instance");
+	}
+	ws1.open();
+
+	const sentA = chat.sendWs({
+		type: "rpc_command",
+		sessionId: "rpc-a",
+		command: { type: "prompt", message: "alpha" },
+	});
+	const sentB = chat.sendWs({
+		type: "rpc_command",
+		sessionId: "rpc-b",
+		command: { type: "prompt", message: "beta" },
+	});
+	assertEq(sentA, true, "session A prompt is sent before reconnect");
+	assertEq(sentB, true, "session B prompt is sent before reconnect");
+
+	const pendingAId = [...stateA.pendingRpcCommands.keys()][0] ?? "";
+	const pendingBId = [...stateB.pendingRpcCommands.keys()][0] ?? "";
+	assert(Boolean(pendingAId), "session A tracks a pending replay command");
+	assert(Boolean(pendingBId), "session B tracks a pending replay command");
+
+	ws1.close();
+	chat.manualReconnect();
+
+	const ws2 = MockWebSocket.instances[1];
+	if (!ws2) {
+		throw new Error("expected second websocket instance");
+	}
+	ws2.open();
+
+	const sentAfterReconnect = ws2.jsonSent();
+	const resumeA = sentAfterReconnect.find((m) => {
+		const command = asRecord(m.command);
+		return (
+			m.type === "rpc_command" &&
+			m.sessionId === "rpc-a" &&
+			command.type === "get_state"
+		);
+	});
+	const resumeB = sentAfterReconnect.find((m) => {
+		const command = asRecord(m.command);
+		return (
+			m.type === "rpc_command" &&
+			m.sessionId === "rpc-b" &&
+			command.type === "get_state"
+		);
+	});
+
+	assert(Boolean(resumeA), "reconnect resumes focused session state");
+	assert(Boolean(resumeB), "reconnect resumes background session state");
+	assertEq(
+		resumeA?.lastEventSeq,
+		5,
+		"focused reconnect resume uses focused session sequence cursor",
+	);
+	assertEq(
+		resumeB?.lastEventSeq,
+		9,
+		"background reconnect resume uses background session sequence cursor",
+	);
+
+	ws2.message({
+		type: "rpc_event",
+		sessionId: "rpc-a",
+		seq: 6,
+		event: {
+			type: "response",
+			id: asRecord(resumeA?.command).id,
+			command: "get_state",
+			success: true,
+			data: { isStreaming: false },
+		},
+	});
+	ws2.message({
+		type: "rpc_event",
+		sessionId: "rpc-b",
+		seq: 10,
+		event: {
+			type: "response",
+			id: asRecord(resumeB?.command).id,
+			command: "get_state",
+			success: true,
+			data: { isStreaming: false },
+		},
+	});
+
+	const replayedPrompts = ws2.jsonSent().filter((m) => {
+		const command = asRecord(m.command);
+		return m.type === "rpc_command" && command.type === "prompt";
+	});
+	const replayedA = replayedPrompts.find((m) => {
+		const command = asRecord(m.command);
+		return m.sessionId === "rpc-a" && command.id === pendingAId;
+	});
+	const replayedB = replayedPrompts.find((m) => {
+		const command = asRecord(m.command);
+		return m.sessionId === "rpc-b" && command.id === pendingBId;
+	});
+
+	assert(Boolean(replayedA), "focused pending commands replay after reconnect");
+	assert(
+		Boolean(replayedB),
+		"background pending commands replay after reconnect",
+	);
+	assertEq(
+		replayedPrompts.filter((m) => asRecord(m.command).id === pendingAId).length,
+		1,
+		"focused prompt replay is deduped to one send",
+	);
+	assertEq(
+		replayedPrompts.filter((m) => asRecord(m.command).id === pendingBId).length,
+		1,
+		"background prompt replay is deduped to one send",
+	);
+}
+
+console.log(
+	"\n-- rpc_session_not_found recovers background runtime by session --",
+);
+{
+	const chat = await loadChatVm();
+	chat.ensureSessionState("sess-a", {
+		rpcSessionId: "rpc-a",
+		sessionFile: "/tmp/sess-a.jsonl",
+	});
+	chat.ensureSessionState("sess-b", {
+		rpcSessionId: "rpc-b",
+		sessionFile: "/tmp/sess-b.jsonl",
+	});
+	chat.activeSessionId = "sess-a";
+
+	chat.connectWebSocket();
+	const ws = MockWebSocket.instances[0];
+	if (!ws) {
+		throw new Error("expected websocket instance");
+	}
+	ws.open();
+
+	ws.message({
+		type: "rpc_session_not_found",
+		sessionId: "rpc-b",
+		message: "missing background session",
+	});
+
+	const fallback = ws.jsonSent().find((m) => {
+		const command = asRecord(m.command);
+		return (
+			m.type === "rpc_command" &&
+			m.sessionFile === "/tmp/sess-b.jsonl" &&
+			command.type === "switch_session"
+		);
+	});
+
+	assert(
+		Boolean(fallback),
+		"missing background session triggers targeted switch_session fallback",
+	);
+}
+
 console.log("\n-- manual reconnect replaces an open websocket immediately --");
 {
 	const chat = await loadChatVm();
@@ -504,6 +703,7 @@ console.log(
 );
 {
 	const chat = await loadChatVm();
+	chat.activeSessionId = "sess-4";
 	chat.activeRpcSessionId = "rpc-4";
 	chat.lastRpcEventSeq = 10;
 	chat.isStreaming = false;
@@ -527,6 +727,35 @@ console.log(
 		}),
 	});
 	assertEq(chat.isStreaming, true, "next sequence event is applied once");
+}
+
+console.log(
+	"\n-- orphan rpc ids do not route events without a session binding --",
+);
+{
+	const chat = await loadChatVm();
+	chat.activeRpcSessionId = "rpc-orphan";
+	chat.isStreaming = false;
+
+	chat.handleWsMessage({
+		data: JSON.stringify({
+			type: "rpc_event",
+			sessionId: "rpc-orphan",
+			seq: 1,
+			event: { type: "agent_start" },
+		}),
+	});
+
+	assertEq(
+		chat.isStreaming,
+		false,
+		"events for rpc ids without session state are ignored",
+	);
+	assertEq(
+		chat.sessionStateById.size,
+		0,
+		"orphan rpc id writes do not create detached compatibility state",
+	);
 }
 
 console.log(`\n=== Results: ${PASS} passed, ${FAIL} failed ===\n`);

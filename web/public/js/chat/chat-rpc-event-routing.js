@@ -1,6 +1,17 @@
 import * as primitives from "./constants-and-primitives.js";
 import * as modelThinking from "./model-thinking-and-toast.js";
 import * as renderingUsage from "./rendering-and-usage.js";
+import {
+	recoverSessionByFile,
+	replayPendingRpcCommandsForSession,
+} from "./rpc-reconnect-runtime.js";
+import {
+	applyRpcLifecycleToSessionState,
+	findSessionRouteByRpcSessionId,
+	findSessionRouteBySessionFile,
+	markSessionActivity,
+	normalizeRpcSessionKey,
+} from "./rpc-session-routing.js";
 import * as toolSemantics from "./tool-semantics.js";
 
 const { slashContract, normalizeThinkingLevel } = {
@@ -11,39 +22,8 @@ const { slashContract, normalizeThinkingLevel } = {
 };
 
 export const rhoChatRpcEventMethods = {
-	replayPendingRpcCommands() {
-		if (this.replayingPendingRpc) {
-			return;
-		}
-		if (
-			!this.ws ||
-			this.ws.readyState !== WebSocket.OPEN ||
-			!this.isWsConnected ||
-			!this.activeRpcSessionId
-		) {
-			return;
-		}
-
-		if (this.pendingRpcCommands.size === 0) {
-			return;
-		}
-
-		this.replayingPendingRpc = true;
-		try {
-			for (const [commandId, entry] of this.pendingRpcCommands.entries()) {
-				const pendingPayload = JSON.parse(JSON.stringify(entry.payload));
-				pendingPayload.sessionId = this.activeRpcSessionId;
-				if (!pendingPayload.command?.id) {
-					pendingPayload.command = {
-						...(pendingPayload.command ?? {}),
-						id: commandId,
-					};
-				}
-				this.ws.send(JSON.stringify(pendingPayload));
-			}
-		} finally {
-			this.replayingPendingRpc = false;
-		}
+	replayPendingRpcCommands(sessionId = "") {
+		replayPendingRpcCommandsForSession(this, sessionId);
 	},
 
 	sendWs(payload, options = {}) {
@@ -74,6 +54,27 @@ export const rhoChatRpcEventMethods = {
 		this.trackPendingRpcCommand(preparedPayload, options);
 		this.ws.send(JSON.stringify(preparedPayload));
 		return true;
+	},
+
+	handleBackgroundRpcEvent(route, event) {
+		if (!route || !event || event.type !== "response") {
+			return;
+		}
+		if (event.command !== "get_state") {
+			return;
+		}
+		if (event.success) {
+			if (route.state.recoveringRpcSession) {
+				route.state.recoveringRpcSession = false;
+				this.replayPendingRpcCommands(route.sessionId);
+			}
+			return;
+		}
+		if (!route.state.recoveringRpcSession) {
+			return;
+		}
+		route.state.recoveringRpcSession = false;
+		recoverSessionByFile(this, route.sessionId, route.state);
 	},
 
 	handleWsMessage(event) {
@@ -107,26 +108,42 @@ export const rhoChatRpcEventMethods = {
 		}
 
 		if (payload.type === "rpc_session_not_found") {
-			if (
-				payload.sessionId &&
-				this.activeRpcSessionId &&
-				payload.sessionId === this.activeRpcSessionId
-			) {
-				this.recoveringRpcSession = false;
-				this.activeRpcSessionId = "";
-				this.lastRpcEventSeq = 0;
-				const sessionFile =
-					this.activeRpcSessionFile ||
-					this.getSessionFile(this.activeSessionId);
-				if (sessionFile) {
-					this.recoveringRpcSession = true;
-					this.startRpcSession(sessionFile);
-				}
+			const route = findSessionRouteByRpcSessionId(this, payload.sessionId);
+			if (!route) {
+				return;
+			}
+
+			const { sessionId, state, isFocused } = route;
+			markSessionActivity(state);
+			state.status = "error";
+			state.error =
+				payload.message ?? `Unknown RPC session: ${payload.sessionId ?? ""}`;
+			state.recoveringRpcSession = false;
+			state.rpcSessionId = "";
+			state.lastEventSeq = 0;
+			this.persistSessionRestoreSnapshot();
+
+			if (!recoverSessionByFile(this, sessionId, state)) {
+				return;
+			}
+			if (!isFocused) {
+				state.unreadMilestone = true;
 			}
 			return;
 		}
 
 		if (payload.type === "rpc_replay_gap") {
+			const route = findSessionRouteByRpcSessionId(this, payload.sessionId);
+			if (route) {
+				markSessionActivity(route.state);
+				route.state.status = "error";
+				route.state.error = "Replay gap detected. Resync required.";
+				recoverSessionByFile(this, route.sessionId, route.state);
+				if (!route.isFocused) {
+					route.state.unreadMilestone = true;
+					return;
+				}
+			}
 			this.showReconnectBanner = true;
 			this.reconnectBannerMessage =
 				"Connection resumed, but some live events were missed. Reloading…";
@@ -135,13 +152,58 @@ export const rhoChatRpcEventMethods = {
 		}
 
 		if (payload.type === "session_started") {
-			this.activeRpcSessionId = payload.sessionId ?? "";
-			this.activeRpcSessionFile = payload.sessionFile ?? "";
-			this.lastRpcEventSeq = 0;
-			this.isForking = false;
-			this.requestState();
-			this.requestAvailableModels();
-			this.requestSlashCommands(true);
+			const routeByFile = findSessionRouteBySessionFile(
+				this,
+				payload.sessionFile,
+			);
+			const focusedSessionId =
+				typeof this.focusedSessionId === "string"
+					? this.focusedSessionId.trim()
+					: "";
+			const targetSessionId = routeByFile?.sessionId ?? focusedSessionId;
+			if (!targetSessionId) {
+				return;
+			}
+
+			const targetState = this.ensureSessionState(targetSessionId, {
+				sessionFile:
+					typeof payload.sessionFile === "string" ? payload.sessionFile : "",
+			});
+			if (!targetState) {
+				return;
+			}
+
+			targetState.rpcSessionId = normalizeRpcSessionKey(payload.sessionId);
+			if (typeof payload.sessionFile === "string") {
+				targetState.sessionFile = payload.sessionFile;
+			}
+			targetState.lastEventSeq = 0;
+			targetState.status = "idle";
+			targetState.error = "";
+			targetState.isStreaming = false;
+			targetState.isSendingPrompt = false;
+			targetState.recoveringRpcSession = false;
+			markSessionActivity(targetState);
+			this.persistSessionRestoreSnapshot();
+
+			if (targetSessionId === this.focusedSessionId) {
+				this.isForking = false;
+				this.requestState();
+				this.requestAvailableModels();
+				this.requestSlashCommands(true);
+				return;
+			}
+			if (targetState.rpcSessionId) {
+				this.sendWs(
+					{
+						type: "rpc_command",
+						sessionId: targetState.rpcSessionId,
+						lastEventSeq: targetState.lastEventSeq,
+						command: { type: "get_state" },
+					},
+					{ replayable: false },
+				);
+			}
 			return;
 		}
 
@@ -149,16 +211,18 @@ export const rhoChatRpcEventMethods = {
 			return;
 		}
 
-		if (!payload.sessionId || payload.sessionId !== this.activeRpcSessionId) {
+		const route = findSessionRouteByRpcSessionId(this, payload.sessionId);
+		if (!route) {
 			return;
 		}
 
 		const seq = Number(payload.seq ?? 0);
 		if (Number.isFinite(seq) && seq > 0) {
-			if (seq <= this.lastRpcEventSeq) {
+			const lastSeq = Number(route.state.lastEventSeq ?? 0);
+			if (seq <= lastSeq) {
 				return;
 			}
-			this.lastRpcEventSeq = seq;
+			route.state.lastEventSeq = seq;
 		}
 
 		const rpcEvent = payload.event;
@@ -166,7 +230,12 @@ export const rhoChatRpcEventMethods = {
 			return;
 		}
 
-		this.handleRpcEvent(rpcEvent);
+		applyRpcLifecycleToSessionState(route, rpcEvent);
+		if (route.isFocused) {
+			this.handleRpcEvent(rpcEvent);
+			return;
+		}
+		this.handleBackgroundRpcEvent(route, rpcEvent);
 	},
 
 	handleRpcEvent(event) {

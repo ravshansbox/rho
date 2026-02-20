@@ -15,9 +15,7 @@ const {
 
 export const rhoChatSessionActionMethods = {
 	applySession(session) {
-		// Don't overwrite live streaming messages with stale disk data
 		if (this.activeRpcSessionId && (this.isStreaming || this.isSendingPrompt)) {
-			// Update metadata only
 			this.activeSession = {
 				...this.activeSession,
 				...session,
@@ -27,7 +25,6 @@ export const rhoChatSessionActionMethods = {
 		}
 		this.activeSession = session;
 
-		// Merge toolResult messages into preceding assistant's tool_call parts
 		const rawMessages = session.messages ?? [];
 		const mergedMessages = [];
 		for (let i = 0; i < rawMessages.length; i++) {
@@ -37,12 +34,10 @@ export const rhoChatSessionActionMethods = {
 				msg.role === "tool_result" ||
 				msg.role === "tool"
 			) {
-				// Find the last assistant message and merge this result into its tool_call parts
 				for (let j = mergedMessages.length - 1; j >= 0; j--) {
 					if (mergedMessages[j].role === "assistant") {
 						const content = mergedMessages[j].content;
 						if (Array.isArray(content)) {
-							// Find first tool_call without merged output
 							const call = content.find(
 								(c) =>
 									(c.type === "toolCall" ||
@@ -63,7 +58,7 @@ export const rhoChatSessionActionMethods = {
 						break;
 					}
 				}
-				continue; // Don't add toolResult as a separate message
+				continue;
 			}
 			mergedMessages.push({ ...msg });
 		}
@@ -71,12 +66,10 @@ export const rhoChatSessionActionMethods = {
 		this.syncSessionStatsFromSession(session, mergedMessages);
 		this.seedUsageAccumulator(mergedMessages);
 
-		// Normalize messages, filter empty ones, and deduplicate by ID
 		const seenIds = new Set();
 		const allMessages = mergedMessages
 			.map((msg) => normalizeMessage(msg, true))
 			.filter((msg) => {
-				// Skip empty messages (no parts or all parts empty)
 				if (!msg.parts || msg.parts.length === 0) {
 					return false;
 				}
@@ -93,12 +86,11 @@ export const rhoChatSessionActionMethods = {
 						p.type === "retry"
 					)
 						return Boolean(p.summary);
-					return true; // Unknown part types pass through
+					return true;
 				});
 				if (!hasContent) {
 					return false;
 				}
-				// Deduplicate by ID
 				if (seenIds.has(msg.id)) {
 					return false;
 				}
@@ -106,10 +98,9 @@ export const rhoChatSessionActionMethods = {
 				return true;
 			});
 
-		// Cap to last ~100 messages, track if there are more
 		const MESSAGE_CAP = 100;
 		this.hasEarlierMessages = allMessages.length > MESSAGE_CAP;
-		this.allNormalizedMessages = allMessages; // Store full list for loadEarlierMessages
+		this.allNormalizedMessages = allMessages;
 		this.renderedMessages = allMessages.slice(-MESSAGE_CAP);
 
 		this.userScrolledUp = false;
@@ -357,7 +348,22 @@ export const rhoChatSessionActionMethods = {
 		}
 	},
 
-	startRpcSession(sessionFile) {
+	startRpcSession(sessionFile, options = {}) {
+		const targetSessionId =
+			typeof options.sessionId === "string"
+				? options.sessionId.trim()
+				: this.focusedSessionId;
+		const targetState = targetSessionId
+			? this.ensureSessionState(targetSessionId, {
+					sessionFile: typeof sessionFile === "string" ? sessionFile : "",
+				})
+			: this.getFocusedSessionState();
+		if (targetState) {
+			targetState.status = "starting";
+			targetState.error = "";
+			targetState.lastActivityAt = Date.now();
+		}
+
 		const sent = this.sendWs({
 			type: "rpc_command",
 			sessionFile,
@@ -368,9 +374,13 @@ export const rhoChatSessionActionMethods = {
 				path: sessionFile,
 			},
 		});
+		this.persistSessionRestoreSnapshot();
 
 		if (!sent) {
 			this.isForking = false;
+			if (targetState) {
+				targetState.status = "error";
+			}
 		}
 	},
 

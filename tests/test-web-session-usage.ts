@@ -154,12 +154,29 @@ console.log("-- session-reader usage aggregation variants --");
 
 console.log("\n-- chat footer accumulation per assistant turn --");
 
-async function loadChatVm(): Promise<any> {
-	const listeners = new Map<string, (...args: any[]) => void>();
-	let factory: (() => any) | null = null;
+type Listener = (...args: unknown[]) => void;
 
-	(globalThis as any).document = {
-		addEventListener: (type: string, cb: (...args: any[]) => void) => {
+interface ChatVm extends Record<string, unknown> {
+	activeSessionId: string;
+	sessionStats: Record<string, unknown>;
+	renderedMessages: unknown[];
+	usageAccountedMessageIds: Set<string>;
+	syncSessionStatsFromSession: (
+		session: Record<string, unknown>,
+		messages: unknown[],
+	) => void;
+	seedUsageAccumulator: (messages: unknown[]) => void;
+	handleMessageEnd: (event: Record<string, unknown>) => void;
+	clearSelectedSession: () => void;
+}
+
+async function loadChatVm(): Promise<ChatVm> {
+	const listeners = new Map<string, Listener>();
+	let factory: (() => Record<string, unknown>) | null = null;
+	const globals = globalThis as unknown as Record<string, unknown>;
+
+	globals.document = {
+		addEventListener: (type: string, cb: Listener) => {
 			listeners.set(type, cb);
 		},
 		querySelector: () => null,
@@ -175,7 +192,7 @@ async function loadChatVm(): Promise<any> {
 		title: "",
 	};
 
-	(globalThis as any).window = {
+	globals.window = {
 		location: {
 			protocol: "http:",
 			host: "localhost:3141",
@@ -186,35 +203,36 @@ async function loadChatVm(): Promise<any> {
 		addEventListener: () => {},
 		removeEventListener: () => {},
 	};
-	(globalThis as any).history = { replaceState: () => {} };
-	(globalThis as any).localStorage = {
+	globals.history = { replaceState: () => {} };
+	globals.localStorage = {
 		getItem: () => null,
 		setItem: () => {},
 	};
-	(globalThis as any).marked = {
+	globals.marked = {
 		setOptions: () => {},
 		parse: (text: string) => text,
 	};
-	(globalThis as any).hljs = undefined;
-	(globalThis as any).fetch = async () => ({
+	globals.hljs = undefined;
+	globals.fetch = async () => ({
 		ok: true,
 		json: async () => [],
 	});
-	(globalThis as any).requestAnimationFrame = (cb: () => void) => {
+	globals.requestAnimationFrame = (cb: () => void) => {
 		cb();
 		return 0;
 	};
-	(globalThis as any).Alpine = {
-		data: (_name: string, fn: () => any) => {
+	globals.Alpine = {
+		data: (_name: string, fn: () => Record<string, unknown>) => {
 			factory = fn;
 		},
 	};
 
-	const chatPath = path.resolve(
-		import.meta.dirname!,
-		"../web/public/js/chat.js",
-	);
-	await import(pathToFileURL(chatPath).href + `?test=${Date.now()}`);
+	const importDir = import.meta.dirname;
+	if (!importDir) {
+		throw new Error("import.meta.dirname is unavailable");
+	}
+	const chatPath = path.resolve(importDir, "../web/public/js/chat.js");
+	await import(`${pathToFileURL(chatPath).href}?test=${Date.now()}`);
 
 	const init = listeners.get("alpine:init");
 	if (!init) {
@@ -226,7 +244,7 @@ async function loadChatVm(): Promise<any> {
 		throw new Error("chat.js did not register Alpine.data factory");
 	}
 
-	const vm = factory();
+	const vm = factory() as ChatVm;
 	vm.$refs = { thread: null };
 	vm.$root = null;
 	vm.$nextTick = (fn: (() => void) | undefined) => {
@@ -242,6 +260,7 @@ async function loadChatVm(): Promise<any> {
 
 {
 	const chat = await loadChatVm();
+	chat.activeSessionId = "sess-usage";
 
 	const loadedMessages = [
 		{
