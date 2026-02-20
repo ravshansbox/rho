@@ -1,0 +1,2 @@
+Console output:
+[log] 'GATE_RESULT {"gate":"reload-restore","focusRestored":true,"draftsRestored":true,"runtimeRestoredCount":5,"activeIdsBeforeReload":5,"activeIdsAfterReload":5,"pass":true}'

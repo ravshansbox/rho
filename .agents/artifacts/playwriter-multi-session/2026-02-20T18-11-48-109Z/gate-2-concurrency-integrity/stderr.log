@@ -1,0 +1,19 @@
+
+Error executing code: Invalid or unexpected token
+evalmachine.<anonymous>:40
+		return chunks.join("
+		                   ^
+
+SyntaxError: Invalid or unexpected token
+    at new Script (node:vm:117:7)
+    at createScript (node:vm:269:10)
+    at Object.runInContext (node:vm:300:10)
+    at PlaywrightExecutor.execute (file:///home/mobrienv/.npm-global/lib/node_modules/playwriter/dist/executor.js:514:20)
+    at async file:///home/mobrienv/.npm-global/lib/node_modules/playwriter/dist/cdp-relay.js:952:28
+    at async dispatch (file:///home/mobrienv/.npm-global/lib/node_modules/playwriter/node_modules/hono/dist/compose.js:22:17)
+    at async file:///home/mobrienv/.npm-global/lib/node_modules/playwriter/dist/cdp-relay.js:926:9
+    at async dispatch (file:///home/mobrienv/.npm-global/lib/node_modules/playwriter/node_modules/hono/dist/compose.js:22:17)
+    at async cors2 (file:///home/mobrienv/.npm-global/lib/node_modules/playwriter/node_modules/hono/dist/middleware/cors/index.js:79:5)
+    at async dispatch (file:///home/mobrienv/.npm-global/lib/node_modules/playwriter/node_modules/hono/dist/compose.js:22:17)
+
+[HINT: If this is an internal Playwright error, page/browser closed, or connection issue, call reset to reconnect.]

@@ -1,0 +1,2 @@
+Console output:
+[log] 'GATE_RESULT {"gate":"background-continuity","unreadWhileBackground":true,"alphaStatusAfterBackground":"idle","getStateIssued":true,"unreadCleared":true,"pass":true}'

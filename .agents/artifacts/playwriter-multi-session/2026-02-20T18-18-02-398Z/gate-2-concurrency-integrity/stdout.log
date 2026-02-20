@@ -1,0 +1,2 @@
+Console output:
+[log] 'GATE_RESULT {"gate":"concurrency-integrity","alphaStillStreamingAtSwitch":true,"alphaContainsAlpha":true,"betaContainsBeta":true,"alphaContainsBeta":false,"betaContainsAlpha":false,"pass":true}'
