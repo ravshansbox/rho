@@ -13,6 +13,21 @@ import {
 } from "./server-core.ts";
 import { registerUiSocket, unregisterUiSocket } from "./server-ui-events.ts";
 
+// --- RPC Observability API ---
+
+app.get("/api/rpc/sessions", (c) => {
+	try {
+		return c.json(rpcManager.getActiveSessions());
+	} catch (error) {
+		return c.json(
+			{
+				error: (error as Error).message ?? "Failed to list active RPC sessions",
+			},
+			500,
+		);
+	}
+});
+
 // --- WebSocket ---
 
 app.get(
