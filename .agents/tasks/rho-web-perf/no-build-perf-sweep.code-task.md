@@ -25,9 +25,9 @@ The codebase is ~6300 lines of frontend JS + ~2300 lines of server TS. No framew
 - [x] 6. Batch streaming markdown renders (150ms debounce) - DONE (verified line 1544-1550)
 - [x] 7. Cap rendered messages (~100) with "Load earlier" button - DONE (verified line 2215-2218)
 
-### Phase 3: Network ⚠️ PARTIAL  
+### Phase 3: Network ✅ DONE
 - [x] 8. Add `<link rel="preload">` tags for CDN scripts - DONE (verified)
-- [ ] 9. Replace polling with WebSocket push - PARTIAL: idle detection + Page Visibility API done, full WebSocket push NOT implemented
+- [x] 9. Replace polling with WebSocket push - DONE: server broadcasts `sessions_changed` on session create/fork, client listens for `rho:ui-event` and calls loadSessions()
 
 ### Server-side
 1. Add gzip/brotli compression via Hono's `compress()` middleware

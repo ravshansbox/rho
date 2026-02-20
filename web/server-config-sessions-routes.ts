@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { getRhoHome } from "./config.ts";
 import { app, loadPiSessionManagerModule } from "./server-core.ts";
+import { broadcastUiEvent } from "./server-ui-events.ts";
 import {
 	findSessionFileById,
 	listSessions,
@@ -123,6 +124,12 @@ app.post("/api/sessions/:id/fork", async (c) => {
 		}
 
 		const forkedSession = await readSession(forkedSessionFile);
+
+		// Broadcast session change to connected UI clients
+		broadcastUiEvent("sessions_changed", {
+			sessionId: forkedSession.header.id,
+		});
+
 		return c.json({
 			sourceSessionId,
 			sourceSessionFile,
@@ -166,6 +173,9 @@ app.post("/api/sessions/new", async (c) => {
 			timestamp,
 		});
 		await writeFile(sessionFile, `${header}\n`, "utf-8");
+
+		// Broadcast session change to connected UI clients
+		broadcastUiEvent("sessions_changed", { sessionId });
 
 		const session = await readSession(sessionFile);
 		return c.json({

@@ -290,9 +290,12 @@ A browser-based interface for chatting, browsing memory, managing tasks, and edi
 rho web                  # Start on default port (3141)
 rho web --port 4000      # Custom port
 rho web --open           # Start and open browser
+rho web restart          # Restart running web server
 ```
 
 Then visit `http://localhost:3141` (or your machine's IP for remote access — the server binds `0.0.0.0` by default).
+
+If web is auto-started by the daemon (`[settings.web].enabled = true` with `rho start`), `rho web restart` restarts the daemon to bounce web. For standalone `rho web` sessions, it restarts the tracked web process directly.
 
 ### Web code architecture (no-build)
 

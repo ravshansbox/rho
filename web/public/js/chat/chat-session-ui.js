@@ -214,6 +214,15 @@ export const rhoChatSessionUiMethods = {
 		};
 
 		document.addEventListener("visibilitychange", handleVisibilityChange);
+
+		// Listen for server-pushed session changes via WebSocket
+		const handleSessionsChanged = (event) => {
+			const name = event?.detail?.name;
+			if (name === "sessions_changed" && this.isChatViewVisible()) {
+				this.loadSessions(false);
+			}
+		};
+		window.addEventListener("rho:ui-event", handleSessionsChanged);
 	},
 
 	sessionsTotal: 0,
