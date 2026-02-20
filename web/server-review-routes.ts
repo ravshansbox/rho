@@ -8,6 +8,9 @@ import {
 	resolveReviewRecord,
 } from "./review-store.ts";
 import {
+	type ReviewComment,
+	type ReviewFile,
+	type ReviewSession,
 	app,
 	getReviewSession,
 	mapReviewStoreError,
@@ -15,8 +18,6 @@ import {
 	persistOpenReviewSession,
 	persistReviewCompletion,
 	publicDir,
-	type ReviewComment,
-	type ReviewSession,
 	readNumericEnv,
 	requireReviewToken,
 	reviewSessions,
@@ -25,6 +26,7 @@ import {
 	toSubmissionSummary,
 	upgradeWebSocket,
 } from "./server-core.ts";
+import { broadcastUiEvent } from "./server-ui-events.ts";
 
 // --- Health ---
 
@@ -93,11 +95,14 @@ app.post("/api/review/sessions", async (c) => {
 				);
 			});
 			reviewSessions.delete(id);
+			broadcastUiEvent("review_sessions_changed");
+			broadcastUiEvent("review_submissions_changed");
 		}
 	}, openTtlMs).unref?.();
 
 	const origin = new URL(c.req.url).origin;
 	const url = `${origin}/review/${id}?token=${token}`;
+	broadcastUiEvent("review_sessions_changed");
 	return c.json({ id, token, url });
 });
 
@@ -145,6 +150,7 @@ app.post("/api/review/submissions/:id/claim", async (c) => {
 
 	try {
 		const record = await claimReviewRecord(id, claimedBy);
+		broadcastUiEvent("review_submissions_changed");
 		return c.json(toSubmissionSummary(record));
 	} catch (error) {
 		const mapped = mapReviewStoreError(error);
@@ -163,6 +169,7 @@ app.post("/api/review/submissions/:id/resolve", async (c) => {
 
 	try {
 		const record = await resolveReviewRecord(id, body.resolvedBy);
+		broadcastUiEvent("review_submissions_changed");
 		return c.json(toSubmissionSummary(record));
 	} catch (error) {
 		const mapped = mapReviewStoreError(error);
@@ -200,6 +207,8 @@ app.delete("/api/review/sessions/:id", (c) => {
 	}
 
 	reviewSessions.delete(id);
+	broadcastUiEvent("review_sessions_changed");
+	broadcastUiEvent("review_submissions_changed");
 	return c.json({ ok: true });
 });
 
@@ -316,6 +325,9 @@ app.get(
 				} else {
 					return;
 				}
+
+				broadcastUiEvent("review_sessions_changed");
+				broadcastUiEvent("review_submissions_changed");
 
 				void persistReviewCompletion(session).catch((error) => {
 					console.warn(

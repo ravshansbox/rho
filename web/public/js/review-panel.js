@@ -10,33 +10,66 @@ function rhoReviewDashboard() {
 		error: null,
 		actionError: null,
 		isStartingReview: false,
-		_timer: null,
+		_refreshTimer: null,
+		_isDirty: false,
 		_onVisibilityChange: null,
+		_onUiEvent: null,
+		_onViewChange: null,
 
 		async init() {
 			await this.refresh();
 			this.loading = false;
+
 			this._onVisibilityChange = () => {
-				if (this.isPanelVisible()) {
-					this.refresh();
+				if (this.isPanelVisible() && this._isDirty) {
+					this.scheduleRefresh(0);
 				}
 			};
 			document.addEventListener("visibilitychange", this._onVisibilityChange);
-			this._timer = setInterval(() => {
-				if (this.isPanelVisible()) {
-					this.refresh();
+
+			this._onViewChange = (event) => {
+				if (event?.detail?.view !== "review") return;
+				this.scheduleRefresh(0);
+			};
+			window.addEventListener("rho:view-changed", this._onViewChange);
+
+			this._onUiEvent = (event) => {
+				const name = event?.detail?.name;
+				if (
+					name !== "git_context_changed" &&
+					name !== "review_sessions_changed" &&
+					name !== "review_submissions_changed"
+				) {
+					return;
 				}
-			}, 15000);
+				if (!this.isPanelVisible()) {
+					this._isDirty = true;
+					return;
+				}
+				this.scheduleRefresh(80);
+			};
+			window.addEventListener("rho:ui-event", this._onUiEvent);
 		},
 
 		destroy() {
-			if (this._timer) clearInterval(this._timer);
+			if (this._refreshTimer) {
+				clearTimeout(this._refreshTimer);
+				this._refreshTimer = null;
+			}
 			if (this._onVisibilityChange) {
 				document.removeEventListener(
 					"visibilitychange",
 					this._onVisibilityChange,
 				);
 				this._onVisibilityChange = null;
+			}
+			if (this._onUiEvent) {
+				window.removeEventListener("rho:ui-event", this._onUiEvent);
+				this._onUiEvent = null;
+			}
+			if (this._onViewChange) {
+				window.removeEventListener("rho:view-changed", this._onViewChange);
+				this._onViewChange = null;
 			}
 		},
 
@@ -47,8 +80,19 @@ function rhoReviewDashboard() {
 			return reviewView.offsetParent !== null;
 		},
 
+		scheduleRefresh(delayMs = 0) {
+			if (this._refreshTimer) {
+				clearTimeout(this._refreshTimer);
+			}
+			this._refreshTimer = setTimeout(() => {
+				this._refreshTimer = null;
+				void this.refresh();
+			}, delayMs);
+		},
+
 		async refresh() {
 			if (!this.loading && !this.isPanelVisible()) {
+				this._isDirty = true;
 				return;
 			}
 			try {
@@ -83,6 +127,8 @@ function rhoReviewDashboard() {
 					const data = await submissionsRes.json();
 					this.submissions = Array.isArray(data) ? data : [];
 				}
+
+				this._isDirty = false;
 			} catch {
 				// keep current state
 			}
@@ -98,9 +144,9 @@ function rhoReviewDashboard() {
 				}),
 				{ add: 0, del: 0 },
 			);
-			let s = n + " file" + (n !== 1 ? "s" : "");
-			if (totals.add) s += " +" + totals.add;
-			if (totals.del) s += " −" + totals.del;
+			let s = `${n} file${n !== 1 ? "s" : ""}`;
+			if (totals.add) s += ` +${totals.add}`;
+			if (totals.del) s += ` −${totals.del}`;
 			return s;
 		},
 
@@ -134,7 +180,7 @@ function rhoReviewDashboard() {
 			this.diffs = { ...this.diffs, [path]: false };
 			try {
 				const res = await fetch(
-					"/api/git/diff?file=" + encodeURIComponent(path),
+					`/api/git/diff?file=${encodeURIComponent(path)}`,
 				);
 				const text = res.ok ? await res.text() : "";
 				this.diffs = { ...this.diffs, [path]: text || "" };
@@ -182,9 +228,9 @@ function rhoReviewDashboard() {
 		relativeTime(ts) {
 			const diff = Date.now() - ts;
 			if (diff < 60000) return "just now";
-			if (diff < 3600000) return Math.floor(diff / 60000) + "m ago";
-			if (diff < 86400000) return Math.floor(diff / 3600000) + "h ago";
-			return Math.floor(diff / 86400000) + "d ago";
+			if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+			if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+			return `${Math.floor(diff / 86400000)}d ago`;
 		},
 
 		submissionMeta(entry) {
@@ -206,19 +252,17 @@ function renderReviewDashDiff(text) {
 		return '<div class="reviewdash-diff-empty">no changes</div>';
 	let html = "";
 	for (const hunk of hunks) {
-		html +=
-			'<div class="reviewdash-diff-hunk">' + escapeHtml(hunk.header) + "</div>";
+		html += `<div class="reviewdash-diff-hunk">${escapeHtml(hunk.header)}</div>`;
 		for (const line of hunk.lines) {
 			const cls =
 				line.type === "add" ? "add" : line.type === "del" ? "del" : "ctx";
 			const sign =
 				line.type === "add" ? "+" : line.type === "del" ? "−" : "&nbsp;";
-			html += '<div class="reviewdash-diff-line ' + cls + '">';
-			html += '<span class="reviewdash-ln">' + (line.old ?? "") + "</span>";
-			html += '<span class="reviewdash-ln">' + (line.new ?? "") + "</span>";
-			html += '<span class="reviewdash-sign">' + sign + "</span>";
-			html +=
-				'<span class="reviewdash-text">' + escapeHtml(line.text) + "</span>";
+			html += `<div class="reviewdash-diff-line ${cls}">`;
+			html += `<span class="reviewdash-ln">${line.old ?? ""}</span>`;
+			html += `<span class="reviewdash-ln">${line.new ?? ""}</span>`;
+			html += `<span class="reviewdash-sign">${sign}</span>`;
+			html += `<span class="reviewdash-text">${escapeHtml(line.text)}</span>`;
 			html += "</div>";
 		}
 	}
@@ -239,8 +283,8 @@ function parseReviewDashDiff(text) {
 			continue;
 		}
 		const header = m[5] || `@@ -${m[1]},${m[2] || 1} +${m[3]},${m[4] || 1} @@`;
-		let oldNum = parseInt(m[1], 10);
-		let newNum = parseInt(m[3], 10);
+		let oldNum = Number.parseInt(m[1], 10);
+		let newNum = Number.parseInt(m[3], 10);
 		const hunk = { header, lines: [] };
 		i++;
 		while (i < lines.length && !lines[i].startsWith("@@")) {

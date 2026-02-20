@@ -3,7 +3,7 @@ import { pathToFileURL } from "node:url";
 
 let PASS = 0;
 let FAIL = 0;
-let cachedFactory: (() => any) | null = null;
+let cachedFactory: (() => Record<string, unknown>) | null = null;
 
 function assert(condition: boolean, label: string): void {
 	if (condition) {
@@ -28,7 +28,36 @@ function assertEq(actual: unknown, expected: unknown, label: string): void {
 	FAIL++;
 }
 
-type Listener = (event?: any) => void;
+function asRecord(value: unknown): Record<string, unknown> {
+	if (typeof value === "object" && value !== null) {
+		return value as Record<string, unknown>;
+	}
+	return {};
+}
+
+type Listener = (event?: unknown) => void;
+
+interface ChatVm extends Record<string, unknown> {
+	activeSessionId: string;
+	activeRpcSessionId: string;
+	activeRpcSessionFile: string;
+	lastRpcEventSeq: number;
+	sessions: unknown[];
+	isSendingPrompt: boolean;
+	awaitingStreamReconnectState: boolean;
+	streamDisconnectedDuringResponse: boolean;
+	isStreaming: boolean;
+	connectWebSocket: () => void;
+	sendWs: (payload: Record<string, unknown>) => boolean;
+	manualReconnect: () => void;
+	handleStateUpdate: (state: Record<string, unknown>) => void;
+	handleWsMessage: (event: { data: string }) => void;
+	selectSession: (
+		sessionId: string,
+		options?: Record<string, unknown>,
+	) => Promise<void>;
+	startRpcSession: (sessionFile: string) => void;
+}
 
 class MockWebSocket {
 	static readonly CONNECTING = 0;
@@ -52,10 +81,9 @@ class MockWebSocket {
 		cb: Listener,
 		options?: { once?: boolean },
 	): void {
-		if (!this.listeners.has(type)) {
-			this.listeners.set(type, []);
-		}
-		this.listeners.get(type)!.push({ cb, once: Boolean(options?.once) });
+		const current = this.listeners.get(type) ?? [];
+		current.push({ cb, once: Boolean(options?.once) });
+		this.listeners.set(type, current);
 	}
 
 	send(data: string): void {
@@ -92,18 +120,19 @@ class MockWebSocket {
 		);
 	}
 
-	jsonSent(): any[] {
-		return this.sent.map((line) => JSON.parse(line));
+	jsonSent(): Record<string, unknown>[] {
+		return this.sent.map((line) => asRecord(JSON.parse(line)));
 	}
 }
 
-async function loadChatVm(): Promise<any> {
+async function loadChatVm(): Promise<ChatVm> {
 	MockWebSocket.instances = [];
-	let factory: (() => any) | null = cachedFactory;
-	const listeners = new Map<string, (...args: any[]) => void>();
+	let factory: (() => Record<string, unknown>) | null = cachedFactory;
+	const listeners = new Map<string, () => void>();
+	const globals = globalThis as unknown as Record<string, unknown>;
 
-	(globalThis as any).document = {
-		addEventListener: (type: string, cb: (...args: any[]) => void) => {
+	globals.document = {
+		addEventListener: (type: string, cb: () => void) => {
 			listeners.set(type, cb);
 		},
 		querySelector: () => null,
@@ -119,7 +148,7 @@ async function loadChatVm(): Promise<any> {
 		title: "",
 	};
 
-	(globalThis as any).window = {
+	globals.window = {
 		location: {
 			protocol: "http:",
 			host: "localhost:3141",
@@ -131,39 +160,40 @@ async function loadChatVm(): Promise<any> {
 		removeEventListener: () => {},
 	};
 
-	(globalThis as any).history = { replaceState: () => {} };
-	(globalThis as any).localStorage = {
+	globals.history = { replaceState: () => {} };
+	globals.localStorage = {
 		getItem: () => null,
 		setItem: () => {},
 	};
-	(globalThis as any).marked = {
+	globals.marked = {
 		setOptions: () => {},
 		parse: (text: string) => text,
 	};
-	(globalThis as any).hljs = undefined;
-	(globalThis as any).fetch = async () => ({
+	globals.hljs = undefined;
+	globals.fetch = async () => ({
 		ok: true,
 		json: async () => [],
 		headers: { get: () => "0" },
 	});
-	(globalThis as any).requestAnimationFrame = (cb: () => void) => {
+	globals.requestAnimationFrame = (cb: () => void) => {
 		cb();
 		return 0;
 	};
-	(globalThis as any).WebSocket = MockWebSocket;
-	(globalThis as any).Alpine = {
-		data: (_name: string, fn: () => any) => {
+	globals.WebSocket = MockWebSocket;
+	globals.Alpine = {
+		data: (_name: string, fn: () => Record<string, unknown>) => {
 			factory = fn;
 		},
 	};
 
 	if (!cachedFactory) {
-		const chatPath = path.resolve(
-			import.meta.dirname!,
-			"../web/public/js/chat.js",
-		);
+		const importDir = import.meta.dirname;
+		if (!importDir) {
+			throw new Error("import.meta.dirname is unavailable");
+		}
+		const chatPath = path.resolve(importDir, "../web/public/js/chat.js");
 		await import(
-			pathToFileURL(chatPath).href + `?reconnect-test=${Date.now()}`
+			`${pathToFileURL(chatPath).href}?reconnect-test=${Date.now()}`
 		);
 
 		const init = listeners.get("alpine:init");
@@ -181,7 +211,7 @@ async function loadChatVm(): Promise<any> {
 		throw new Error("chat.js did not register Alpine.data factory");
 	}
 
-	const vm = factory();
+	const vm = factory() as ChatVm;
 	vm.$refs = { thread: null, composerInput: null };
 	vm.$root = null;
 	vm.$nextTick = (fn: (() => void) | undefined) => {
@@ -210,16 +240,21 @@ console.log("-- reconnect resumes existing rpc session with replay cursor --");
 	chat.lastRpcEventSeq = 42;
 
 	chat.connectWebSocket();
-	const ws = MockWebSocket.instances[0]!;
+	const ws = MockWebSocket.instances[0];
+	if (!ws) {
+		throw new Error("expected websocket instance");
+	}
 	ws.open();
 
 	const messages = ws.jsonSent();
-	const resume = messages.find(
-		(m) =>
+	const resume = messages.find((m) => {
+		const command = asRecord(m.command);
+		return (
 			m.type === "rpc_command" &&
 			m.sessionId === "rpc-1" &&
-			m.command?.type === "get_state",
-	);
+			command.type === "get_state"
+		);
+	});
 
 	assert(
 		Boolean(resume),
@@ -242,7 +277,10 @@ console.log(
 	chat.activeRpcSessionFile = "/tmp/sess-2.jsonl";
 
 	chat.connectWebSocket();
-	const ws = MockWebSocket.instances[0]!;
+	const ws = MockWebSocket.instances[0];
+	if (!ws) {
+		throw new Error("expected websocket instance");
+	}
 	ws.open();
 
 	ws.message({
@@ -251,16 +289,79 @@ console.log(
 	});
 
 	const messages = ws.jsonSent();
-	const fallback = messages.find(
-		(m) =>
+	const fallback = messages.find((m) => {
+		const command = asRecord(m.command);
+		return (
 			m.type === "rpc_command" &&
 			m.sessionFile === "/tmp/sess-2.jsonl" &&
-			m.command?.type === "switch_session",
-	);
+			command.type === "switch_session"
+		);
+	});
 
 	assert(
 		Boolean(fallback),
 		"missing session triggers switch_session fallback using sessionFile",
+	);
+}
+
+console.log(
+	"\n-- selecting a hashed session outside loaded page still resumes rpc --",
+);
+{
+	const chat = await loadChatVm();
+	let startedSessionFile = "";
+	chat.startRpcSession = (sessionFile: string) => {
+		startedSessionFile = sessionFile;
+	};
+	chat.sessions = [
+		{
+			id: "sess-visible",
+			file: "/tmp/sess-visible.jsonl",
+			cwd: "",
+			timestamp: "2026-01-01T00:00:00.000Z",
+			messageCount: 1,
+			isActive: false,
+		},
+	];
+
+	const globals = globalThis as unknown as Record<string, unknown>;
+	globals.fetch = async (url: unknown) => {
+		if (url === "/api/sessions/sess-missing") {
+			return {
+				ok: true,
+				headers: { get: () => "0" },
+				json: async () => ({
+					header: {
+						type: "session",
+						id: "sess-missing",
+						timestamp: "2026-01-01T00:00:00.000Z",
+						cwd: "/tmp",
+					},
+					messages: [],
+					forkPoints: [],
+					stats: { messageCount: 0, tokenUsage: 0, cost: 0 },
+					file: "/tmp/sess-missing.jsonl",
+				}),
+			};
+		}
+		return {
+			ok: true,
+			headers: { get: () => "0" },
+			json: async () => [],
+		};
+	};
+
+	await chat.selectSession("sess-missing", { updateHash: false });
+
+	assertEq(
+		chat.activeRpcSessionFile,
+		"/tmp/sess-missing.jsonl",
+		"selectSession stores file from session payload",
+	);
+	assertEq(
+		startedSessionFile,
+		"/tmp/sess-missing.jsonl",
+		"selectSession starts rpc from payload file when summary page misses id",
 	);
 }
 
@@ -274,7 +375,10 @@ console.log(
 	chat.activeRpcSessionFile = "/tmp/sess-3.jsonl";
 
 	chat.connectWebSocket();
-	const ws1 = MockWebSocket.instances[0]!;
+	const ws1 = MockWebSocket.instances[0];
+	if (!ws1) {
+		throw new Error("expected websocket instance");
+	}
 	ws1.open();
 
 	const sent = chat.sendWs({
@@ -286,20 +390,27 @@ console.log(
 
 	const promptSend = ws1
 		.jsonSent()
-		.filter((m) => m.type === "rpc_command" && m.command?.type === "prompt")
+		.filter((m) => {
+			const command = asRecord(m.command);
+			return m.type === "rpc_command" && command.type === "prompt";
+		})
 		.pop();
-	const promptId = promptSend?.command?.id;
+	const promptId = asRecord(promptSend?.command).id;
 	assert(Boolean(promptId), "client assigns command id to outbound prompt");
 
 	ws1.close();
 	chat.manualReconnect();
 
-	const ws2 = MockWebSocket.instances[1]!;
+	const ws2 = MockWebSocket.instances[1];
+	if (!ws2) {
+		throw new Error("expected second websocket instance");
+	}
 	ws2.open();
 
-	const resumeCmd = ws2
-		.jsonSent()
-		.find((m) => m.type === "rpc_command" && m.command?.type === "get_state");
+	const resumeCmd = ws2.jsonSent().find((m) => {
+		const command = asRecord(m.command);
+		return m.type === "rpc_command" && command.type === "get_state";
+	});
 	assert(
 		Boolean(resumeCmd),
 		"reconnect sends get_state resume command before replay",
@@ -311,7 +422,7 @@ console.log(
 		seq: 1,
 		event: {
 			type: "response",
-			id: resumeCmd?.command?.id,
+			id: asRecord(resumeCmd?.command).id,
 			command: "get_state",
 			success: true,
 			data: { isStreaming: false, thinkingLevel: "medium" },
@@ -320,7 +431,10 @@ console.log(
 
 	const resentPrompt = ws2
 		.jsonSent()
-		.filter((m) => m.type === "rpc_command" && m.command?.type === "prompt")
+		.filter((m) => {
+			const command = asRecord(m.command);
+			return m.type === "rpc_command" && command.type === "prompt";
+		})
 		.pop();
 
 	assert(
@@ -328,9 +442,44 @@ console.log(
 		"pending prompt replays after reconnect state recovery",
 	);
 	assertEq(
-		resentPrompt?.command?.id,
+		asRecord(resentPrompt?.command).id,
 		promptId,
 		"replayed prompt keeps original command id for dedupe safety",
+	);
+}
+
+console.log("\n-- manual reconnect replaces an open websocket immediately --");
+{
+	const chat = await loadChatVm();
+	chat.activeSessionId = "sess-4";
+	chat.activeRpcSessionId = "rpc-4";
+	chat.activeRpcSessionFile = "/tmp/sess-4.jsonl";
+
+	chat.connectWebSocket();
+	const ws1 = MockWebSocket.instances[0];
+	if (!ws1) {
+		throw new Error("expected websocket instance");
+	}
+	ws1.open();
+
+	chat.manualReconnect();
+	const ws2 = MockWebSocket.instances[1];
+
+	assert(
+		Boolean(ws2),
+		"manual reconnect creates a new websocket even when one is open",
+	);
+	assertEq(
+		ws1.readyState,
+		MockWebSocket.CLOSED,
+		"manual reconnect closes the previous open websocket",
+	);
+
+	ws2?.open();
+	assertEq(
+		chat.showReconnectBanner,
+		false,
+		"new websocket open clears reconnect banner",
 	);
 }
 

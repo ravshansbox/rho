@@ -1,10 +1,20 @@
 import { execFile as execFileCb } from "node:child_process";
 import crypto from "node:crypto";
+import { mkdirSync, watch } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { getRhoHome } from "./config.ts";
-import { app } from "./server-core.ts";
+import {
+	type ReviewFile,
+	type ReviewSession,
+	app,
+	persistOpenReviewSession,
+	persistReviewCompletion,
+	readNumericEnv,
+	reviewSessions,
+} from "./server-core.ts";
+import { broadcastUiEvent } from "./server-ui-events.ts";
 
 // --- Git API ---
 
@@ -15,6 +25,42 @@ interface GitContextFile {
 	updatedAt: number;
 	sessionFiles: string[];
 }
+
+let gitContextWatchStarted = false;
+let gitContextNotifyTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleGitContextNotify(): void {
+	if (gitContextNotifyTimer) {
+		clearTimeout(gitContextNotifyTimer);
+	}
+	gitContextNotifyTimer = setTimeout(() => {
+		gitContextNotifyTimer = null;
+		broadcastUiEvent("git_context_changed");
+	}, 100);
+}
+
+function startGitContextWatch(): void {
+	if (gitContextWatchStarted) return;
+	gitContextWatchStarted = true;
+	const rhoHome = getRhoHome();
+	const contextFile = "git-context.json";
+	try {
+		mkdirSync(rhoHome, { recursive: true });
+		const watcher = watch(rhoHome, (_eventType, filename) => {
+			const fileName =
+				typeof filename === "string" ? filename : filename?.toString();
+			if (!fileName || fileName !== contextFile) return;
+			scheduleGitContextNotify();
+		});
+		watcher.on("error", () => {
+			// Best effort only; polling fallback remains available.
+		});
+	} catch {
+		// Best effort only; polling fallback remains available.
+	}
+}
+
+startGitContextWatch();
 
 async function readGitContext(): Promise<GitContextFile | null> {
 	try {
@@ -105,8 +151,8 @@ function parseNumstat(
 		if (!line) continue;
 		const parts = line.split("\t");
 		if (parts.length >= 3) {
-			const add = parts[0] === "-" ? 0 : parseInt(parts[0]) || 0;
-			const del = parts[1] === "-" ? 0 : parseInt(parts[1]) || 0;
+			const add = parts[0] === "-" ? 0 : Number.parseInt(parts[0]) || 0;
+			const del = parts[1] === "-" ? 0 : Number.parseInt(parts[1]) || 0;
 			map.set(parts[2], { add, del });
 		}
 	}
@@ -395,10 +441,13 @@ app.post("/api/review/from-git", async (c) => {
 				);
 			});
 			reviewSessions.delete(id);
+			broadcastUiEvent("review_sessions_changed");
+			broadcastUiEvent("review_submissions_changed");
 		}
 	}, openTtlMs).unref?.();
 
 	const origin = new URL(c.req.url).origin;
 	const url = `${origin}/review/${id}?token=${token}`;
+	broadcastUiEvent("review_sessions_changed");
 	return c.json({ id, token, url });
 });

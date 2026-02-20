@@ -3,7 +3,8 @@ document.addEventListener("alpine:init", () => {
 		view: "chat",
 		theme: "dark",
 		activeReviewCount: 0,
-		_reviewPollId: null,
+		_onUiEvent: null,
+		_onVisibilityChange: null,
 
 		init() {
 			const qsView = new URLSearchParams(window.location.search).get("view");
@@ -16,13 +17,34 @@ document.addEventListener("alpine:init", () => {
 			document.body.classList.toggle("theme-light", this.theme === "light");
 
 			this._pollReviewSessions(true);
-			this._reviewPollId = setInterval(() => {
-				this._pollReviewSessions();
-			}, 15000);
+
+			this._onUiEvent = (event) => {
+				const name = event?.detail?.name;
+				if (name !== "review_sessions_changed") return;
+				this._pollReviewSessions(true);
+			};
+			window.addEventListener("rho:ui-event", this._onUiEvent);
+
+			this._onVisibilityChange = () => {
+				if (!document.hidden) {
+					this._pollReviewSessions(true);
+				}
+			};
+			document.addEventListener("visibilitychange", this._onVisibilityChange);
 		},
 
 		destroy() {
-			if (this._reviewPollId) clearInterval(this._reviewPollId);
+			if (this._onUiEvent) {
+				window.removeEventListener("rho:ui-event", this._onUiEvent);
+				this._onUiEvent = null;
+			}
+			if (this._onVisibilityChange) {
+				document.removeEventListener(
+					"visibilitychange",
+					this._onVisibilityChange,
+				);
+				this._onVisibilityChange = null;
+			}
 		},
 
 		toggleTheme() {
@@ -32,11 +54,7 @@ document.addEventListener("alpine:init", () => {
 		},
 
 		async _pollReviewSessions(force = false) {
-			if (!force) {
-				if (document.hidden) return;
-				// Review dashboard already polls while the review tab is active.
-				if (this.view === "review") return;
-			}
+			if (!force && document.hidden) return;
 			try {
 				const res = await fetch("/api/review/sessions");
 				if (!res.ok) return;
@@ -58,6 +76,12 @@ document.addEventListener("alpine:init", () => {
 				{},
 				"",
 				`${url.pathname}${url.search}${url.hash}`,
+			);
+
+			window.dispatchEvent(
+				new CustomEvent("rho:view-changed", {
+					detail: { view: nextView },
+				}),
 			);
 
 			if (nextView !== "review") {

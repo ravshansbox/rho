@@ -1,4 +1,5 @@
 import {
+	type WSIncomingMessage,
 	app,
 	clearRpcSubscriptions,
 	extractSessionFile,
@@ -9,15 +10,17 @@ import {
 	sendWsMessage,
 	subscribeToRpcSession,
 	upgradeWebSocket,
-	type WSIncomingMessage,
 } from "./server-core.ts";
+import { registerUiSocket, unregisterUiSocket } from "./server-ui-events.ts";
 
 // --- WebSocket ---
 
 app.get(
 	"/ws",
 	upgradeWebSocket(() => ({
-		onOpen: () => {},
+		onOpen: (_, ws) => {
+			registerUiSocket(ws);
+		},
 		onMessage: async (event, ws) => {
 			if (typeof event.data !== "string") {
 				return;
@@ -145,9 +148,11 @@ app.get(
 		},
 		onClose: (_, ws) => {
 			clearRpcSubscriptions(ws);
+			unregisterUiSocket(ws);
 		},
 		onError: (_, ws) => {
 			clearRpcSubscriptions(ws);
+			unregisterUiSocket(ws);
 		},
 	})),
 );

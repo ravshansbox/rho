@@ -41,26 +41,26 @@ export const rhoChatInputRpcMethods = {
 
 			this._lazyObserver = new IntersectionObserver(
 				(entries) => {
-					entries.forEach((entry) => {
-						if (!entry.isIntersecting) return;
+					for (const entry of entries) {
+						if (!entry.isIntersecting) continue;
 						const msgEl = entry.target;
 						const msgId = msgEl.dataset.messageId;
-						if (!msgId) return;
+						if (!msgId) continue;
 
 						const wasNearBottom = this.isThreadNearBottom(120);
 
 						// Find and render the message
 						const msg = this.renderedMessages.find((m) => m.id === msgId);
-						if (!msg || !msg.parts) return;
+						if (!msg || !msg.parts) continue;
 
 						let modified = false;
-						msg.parts.forEach((part) => {
-							if (part.isRendered) return;
+						for (const part of msg.parts) {
+							if (part.isRendered) continue;
 							if (part.type === "thinking") {
 								part.content = renderMarkdown(part.rawContent || part.content);
 								part.isRendered = true;
 								modified = true;
-								return;
+								continue;
 							}
 							if (part.type === "text") {
 								if (part.render === "html") {
@@ -71,7 +71,7 @@ export const rhoChatInputRpcMethods = {
 								}
 								part.isRendered = true;
 							}
-						});
+						}
 
 						if (modified) {
 							this.$nextTick(() => {
@@ -84,15 +84,15 @@ export const rhoChatInputRpcMethods = {
 
 						// Stop observing once rendered
 						this._lazyObserver?.unobserve(msgEl);
-					});
+					}
 				},
 				{ rootMargin: "200px" }, // Pre-render 200px before visible
 			);
 
 			// Observe all message elements
-			thread.querySelectorAll("[data-message-id]").forEach((el) => {
+			for (const el of thread.querySelectorAll("[data-message-id]")) {
 				this._lazyObserver?.observe(el);
-			});
+			}
 		});
 	},
 
@@ -253,7 +253,18 @@ export const rhoChatInputRpcMethods = {
 		}
 	},
 
-	connectWebSocket() {
+	connectWebSocket(force = false) {
+		if (force && this.ws) {
+			const staleWs = this.ws;
+			this.ws = null;
+			this.isWsConnected = false;
+			this.stopWsHeartbeat();
+			try {
+				staleWs.close();
+			} catch {
+				// Ignore close errors on stale sockets.
+			}
+		}
 		if (
 			this.ws &&
 			(this.ws.readyState === WebSocket.OPEN ||
@@ -271,6 +282,9 @@ export const rhoChatInputRpcMethods = {
 		const ws = new WebSocket(buildWsUrl());
 
 		ws.addEventListener("open", () => {
+			if (this.ws !== ws) {
+				return;
+			}
 			this.isWsConnected = true;
 			this.wsReconnectAttempts = 0;
 			this.error = "";
@@ -310,6 +324,9 @@ export const rhoChatInputRpcMethods = {
 		});
 
 		ws.addEventListener("message", (event) => {
+			if (this.ws !== ws) {
+				return;
+			}
 			this.handleWsMessage(event);
 		});
 
@@ -333,6 +350,9 @@ export const rhoChatInputRpcMethods = {
 		});
 
 		ws.addEventListener("error", () => {
+			if (this.ws !== ws) {
+				return;
+			}
 			this.stopWsHeartbeat();
 			this.isWsConnected = false;
 			// Error handling is done in close event
@@ -362,7 +382,9 @@ export const rhoChatInputRpcMethods = {
 			clearTimeout(this.wsReconnectTimer);
 			this.wsReconnectTimer = null;
 		}
-		this.connectWebSocket();
+		this.showReconnectBanner = true;
+		this.reconnectBannerMessage = "Retrying connection…";
+		this.connectWebSocket(true);
 	},
 
 	startWsHeartbeat() {

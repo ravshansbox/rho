@@ -92,6 +92,13 @@ export const rhoChatRpcEventMethods = {
 			return;
 		}
 
+		if (payload.type === "ui_event") {
+			window.dispatchEvent(
+				new CustomEvent("rho:ui-event", { detail: payload }),
+			);
+			return;
+		}
+
 		if (payload.type === "error") {
 			this.error = payload.message ?? "WebSocket error";
 			this.isForking = false;
