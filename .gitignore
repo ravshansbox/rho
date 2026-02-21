@@ -42,3 +42,6 @@ skills/*/
 
 # Local SOP planning artifacts
 .agents/scratchpad/
+
+# Agent run artifacts logs
+.agents/artifacts/**/*.log
