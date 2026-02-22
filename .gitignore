@@ -1,6 +1,14 @@
 # Dev dependencies (symlinks to pi runtime for tests)
 node_modules/
 
+# Nix/direnv local shell state
+.direnv/
+result
+
+# Local Android/Gradle state from nix dev shell
+.gradle/
+.android/
+
 # Site build artifacts
 site/.wrangler/
 site/node_modules/
