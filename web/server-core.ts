@@ -26,7 +26,7 @@ import {
 	foldBrain,
 	readBrain,
 } from "../extensions/lib/brain-store.ts";
-import { getRhoHome } from "./config.ts";
+import { getRhoHome, getRpcReliabilityConfig } from "./config.ts";
 import {
 	type ReviewStatus,
 	ReviewStoreError,
@@ -67,7 +67,9 @@ if (process.env.RHO_DEBUG === "1") {
 		const start = Date.now();
 		await next();
 		const duration = Date.now() - start;
-		console.log(`${c.req.method} ${c.req.path} ${duration}ms`);
+		console.log(
+			`${c.req.method} ${c.req.url} -> ${c.res.status} (${duration}ms)`,
+		);
 	});
 }
 
@@ -94,11 +96,19 @@ function readNumericEnv(name: string, fallback: number): number {
 	return parsed;
 }
 
+const _rc = getRpcReliabilityConfig();
+const _og = readNumericEnv("RHO_RPC_ORPHAN_GRACE_MS", _rc.orphanGraceMs);
+const _oa = readNumericEnv(
+	"RHO_RPC_ORPHAN_ABORT_DELAY_MS",
+	_rc.orphanAbortDelayMs,
+);
+console.debug(`[rpc] orphan: grace=${_og}ms abort-delay=${_oa}ms`);
+
 const rpcReliability = new RpcSessionReliability({
 	eventBufferSize: readNumericEnv("RHO_RPC_EVENT_BUFFER_SIZE", 800),
 	commandRetentionMs: readNumericEnv("RHO_RPC_COMMAND_RETENTION_MS", 300000),
-	orphanGraceMs: readNumericEnv("RHO_RPC_ORPHAN_GRACE_MS", 60000),
-	orphanAbortDelayMs: readNumericEnv("RHO_RPC_ORPHAN_ABORT_DELAY_MS", 5000),
+	orphanGraceMs: _og,
+	orphanAbortDelayMs: _oa,
 	hasSubscribers: (sessionId) => rpcManager.hasSubscribers(sessionId),
 	onAbort: (sessionId) => {
 		try {

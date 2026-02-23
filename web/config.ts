@@ -99,3 +99,115 @@ export function findKnownFileByPath(candidatePath: string): KnownFile | null {
 
 	return null;
 }
+
+export interface AuthConfig {
+	enabled: boolean;
+	tokenHashes: string[];
+	sessionTtlSeconds: number;
+}
+
+// ── RPC Reliability Config ──────────────────────────────
+
+const DEFAULT_ORPHAN_GRACE_MS = 60_000;
+const DEFAULT_ORPHAN_ABORT_DELAY_MS = 5_000;
+// Minimum values: grace must be at least 1 s; abort-delay may be 0 (immediate).
+const MIN_ORPHAN_GRACE_MS = 1_000;
+const MIN_ORPHAN_ABORT_DELAY_MS = 0;
+
+export interface RpcReliabilityConfig {
+	/** How long (ms) to wait for a subscriber to re-attach before triggering orphan abort. */
+	orphanGraceMs: number;
+	/** How long (ms) after orphan abort before the session is fully stopped. */
+	orphanAbortDelayMs: number;
+}
+
+/**
+ * Parse a raw TOML value as a millisecond duration.
+ * Non-numeric, NaN, or Infinite values fall back to `fallback`.
+ * Valid numbers are clamped to `[minValue, ∞)` and floored.
+ */
+function parseOrphanMs(
+	raw: unknown,
+	minValue: number,
+	fallback: number,
+): number {
+	if (typeof raw !== "number" || !Number.isFinite(raw)) {
+		return fallback;
+	}
+	return Math.max(minValue, Math.floor(raw));
+}
+
+/**
+ * Read orphan-timing config from `[settings.web]` in init.toml.
+ * Pass `initPath` to override the default `~/.rho/init.toml` (useful in tests).
+ * Falls back to safe defaults on any parse error.
+ */
+export function getRpcReliabilityConfig(
+	initPath?: string,
+): RpcReliabilityConfig {
+	const resolvedPath = initPath ?? path.join(getRhoHome(), "init.toml");
+	try {
+		const raw = parseToml(readFileSync(resolvedPath, "utf-8")) as Record<
+			string,
+			unknown
+		>;
+		const settings = (raw?.settings as Record<string, unknown>) ?? {};
+		const web = (settings?.web as Record<string, unknown>) ?? {};
+		return {
+			orphanGraceMs: parseOrphanMs(
+				web.rpc_orphan_grace_ms,
+				MIN_ORPHAN_GRACE_MS,
+				DEFAULT_ORPHAN_GRACE_MS,
+			),
+			orphanAbortDelayMs: parseOrphanMs(
+				web.rpc_orphan_abort_delay_ms,
+				MIN_ORPHAN_ABORT_DELAY_MS,
+				DEFAULT_ORPHAN_ABORT_DELAY_MS,
+			),
+		};
+	} catch {
+		return {
+			orphanGraceMs: DEFAULT_ORPHAN_GRACE_MS,
+			orphanAbortDelayMs: DEFAULT_ORPHAN_ABORT_DELAY_MS,
+		};
+	}
+}
+
+export function getAuthConfig(): AuthConfig {
+	const initPath = path.join(getRhoHome(), "init.toml");
+	try {
+		const raw = parseToml(readFileSync(initPath, "utf-8")) as Record<
+			string,
+			unknown
+		>;
+		const settings = (raw?.settings as Record<string, unknown>) || {};
+		const web = (settings?.web as Record<string, unknown>) || {};
+
+		const tokenHashes = Array.isArray(web.auth_token_hashes)
+			? web.auth_token_hashes.filter((h): h is string => typeof h === "string")
+			: [];
+
+		if (
+			typeof web.auth_token_hash === "string" &&
+			!tokenHashes.includes(web.auth_token_hash)
+		) {
+			tokenHashes.push(web.auth_token_hash);
+		}
+
+		let sessionTtlSeconds = 900;
+		if (
+			typeof web.auth_session_ttl_seconds === "number" &&
+			web.auth_session_ttl_seconds > 0
+		) {
+			sessionTtlSeconds = web.auth_session_ttl_seconds;
+		}
+
+		return {
+			enabled: web.auth_enabled === true,
+			tokenHashes,
+			sessionTtlSeconds,
+		};
+	} catch {
+		return { enabled: false, tokenHashes: [], sessionTtlSeconds: 900 };
+	}
+}

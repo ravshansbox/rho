@@ -79,3 +79,26 @@ require_mention_in_groups = true      # Ignore group chatter unless activated
 [settings.web]
 enabled = false                       # Auto-start with `rho start`
 port = 3141                           # Server port (localhost only)
+
+# ── RPC Orphan Policy ────────────────────────────────────
+# Controls how long rho-web keeps an active session alive after all
+# WebSocket clients disconnect (e.g., phone lock or app backgrounded).
+#
+# Precedence: env var > this config > built-in default
+#   RHO_RPC_ORPHAN_GRACE_MS       overrides rpc_orphan_grace_ms
+#   RHO_RPC_ORPHAN_ABORT_DELAY_MS overrides rpc_orphan_abort_delay_ms
+#
+# Built-in defaults (desktop / fast reconnect):
+#   rpc_orphan_grace_ms       = 60000   # 1 minute
+#   rpc_orphan_abort_delay_ms = 5000    # 5 seconds after abort signal
+#
+# Mobile lock-tolerant example (sustains streams through ~5 min lock):
+#   rpc_orphan_grace_ms       = 300000  # 5 minutes
+#   rpc_orphan_abort_delay_ms = 30000   # 30 seconds soft-stop window
+#
+# Tradeoff: longer grace means orphaned sessions (e.g., browser closed
+# without reconnecting) consume server resources until the timer fires.
+# Tune based on your typical reconnect latency and server capacity.
+#
+# rpc_orphan_grace_ms = 60000
+# rpc_orphan_abort_delay_ms = 5000
