@@ -58,6 +58,15 @@ usage-bars = true     # Token/cost usage display
 
 Some modules are backed by external packages (`subagents`, `messenger`, `interactive-shell`, `web-access`, `mcp-adapter`, `interview-tool`, `visual-explainer`). When enabled, `rho sync` installs their package sources automatically; when disabled, `rho sync` removes them.
 
+Attribution for those default third-party modules:
+- `subagents` → [`nicobailon/pi-subagents`](https://github.com/nicobailon/pi-subagents)
+- `messenger` → [`nicobailon/pi-messenger`](https://github.com/nicobailon/pi-messenger)
+- `interactive-shell` → [`nicobailon/pi-interactive-shell`](https://github.com/nicobailon/pi-interactive-shell)
+- `web-access` → [`nicobailon/pi-web-access`](https://github.com/nicobailon/pi-web-access)
+- `mcp-adapter` → [`nicobailon/pi-mcp-adapter`](https://github.com/nicobailon/pi-mcp-adapter)
+- `interview-tool` (`pi-interview`) → [`nicobailon/pi-interview-tool`](https://github.com/nicobailon/pi-interview-tool)
+- `visual-explainer` → [`nicobailon/visual-explainer`](https://github.com/nicobailon/visual-explainer)
+
 **Disabling a module** removes its extensions and skills from what pi loads. Set it to `false` or delete the line:
 
 ```toml
