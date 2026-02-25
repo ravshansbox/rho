@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-02-25
+
+### Added
+
+- Default package registry now includes the nicobailon extension set in generated config (`templates/init.toml`) and sync behavior.
+- Added a Nix Android/Java development shell (`flake.nix`) with setup docs for mobile development.
+
+### Changed
+
+- RPC orphan handling is now config-driven via `[settings.web]` with deterministic precedence (`env > config > default`) and validation clamps.
+- Configuration docs expanded with attribution and package links for nicobailon-contributed defaults.
+
 ## [0.1.8] - 2026-02-21
 
 ### Added
@@ -27,5 +39,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Review panel no longer keeps stale submitted inbox items after status transitions.
 - Chat composer action overlap on narrow widths (Abort vs Attach/Queue controls).
 
-[Unreleased]: https://github.com/mikeyobrien/rho/compare/v0.1.8...HEAD
+[Unreleased]: https://github.com/mikeyobrien/rho/compare/v0.1.9...HEAD
+[0.1.9]: https://github.com/mikeyobrien/rho/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/mikeyobrien/rho/compare/v0.1.7...v0.1.8
