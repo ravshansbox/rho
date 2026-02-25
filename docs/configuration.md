@@ -33,19 +33,40 @@ memory = true         # Memory browser and viewer
 vault = true          # Knowledge vault with FTS and orphan cleanup
 
 [modules.tools]
-brave-search = true   # Web search via Brave API
-x-search = true       # X/Twitter search via xAI Grok
-email = false         # Agent email at name@rhobot.dev
+brave-search = true      # Web search via Brave API
+x-search = true          # X/Twitter search via xAI Grok
+telegram = true          # Telegram transport adapter
+email = false            # Agent email at name@rhobot.dev
+subagents = true         # Async subagent delegation package
+messenger = true         # Multi-agent communication package
+interactive-shell = true # Observable PTY shell control package
+web-access = true        # Web fetch/search package
+mcp-adapter = true       # MCP adapter package
+interview-tool = true    # Interview workflow package
 
 [modules.skills]
-session-search = true # Search across pi session logs
-update-pi = true      # Update pi to latest version
+workflows = true         # Built-in SOP workflow skills
+session-search = true    # Search across pi session logs
+update-pi = true         # Update pi to latest version
+visual-explainer = true  # External visual explainer skill package
 
 [modules.ui]
 usage-bars = true     # Token/cost usage display
 ```
 
 **Core modules are always on.** Setting `heartbeat = false` or `memory = false` has no effect — they're forced enabled. You'll get a warning from `rho sync` if you try.
+
+Some modules are backed by external packages (`subagents`, `messenger`, `interactive-shell`, `web-access`, `mcp-adapter`, `interview-tool`, `visual-explainer`). When enabled, `rho sync` installs their package sources automatically; when disabled, `rho sync` removes them.
+
+Attribution for those default third-party modules:
+Special thanks to **Nico Bailon (@nicobailon)** for building and maintaining these packages.
+- `subagents` → [`nicobailon/pi-subagents`](https://github.com/nicobailon/pi-subagents)
+- `messenger` → [`nicobailon/pi-messenger`](https://github.com/nicobailon/pi-messenger)
+- `interactive-shell` → [`nicobailon/pi-interactive-shell`](https://github.com/nicobailon/pi-interactive-shell)
+- `web-access` → [`nicobailon/pi-web-access`](https://github.com/nicobailon/pi-web-access)
+- `mcp-adapter` → [`nicobailon/pi-mcp-adapter`](https://github.com/nicobailon/pi-mcp-adapter)
+- `interview-tool` (`pi-interview`) → [`nicobailon/pi-interview-tool`](https://github.com/nicobailon/pi-interview-tool)
+- `visual-explainer` → [`nicobailon/visual-explainer`](https://github.com/nicobailon/visual-explainer)
 
 **Disabling a module** removes its extensions and skills from what pi loads. Set it to `false` or delete the line:
 
