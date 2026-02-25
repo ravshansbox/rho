@@ -59,6 +59,7 @@ usage-bars = true     # Token/cost usage display
 Some modules are backed by external packages (`subagents`, `messenger`, `interactive-shell`, `web-access`, `mcp-adapter`, `interview-tool`, `visual-explainer`). When enabled, `rho sync` installs their package sources automatically; when disabled, `rho sync` removes them.
 
 Attribution for those default third-party modules:
+Special thanks to **Nico Bailon (@nicobailon)** for building and maintaining these packages.
 - `subagents` → [`nicobailon/pi-subagents`](https://github.com/nicobailon/pi-subagents)
 - `messenger` → [`nicobailon/pi-messenger`](https://github.com/nicobailon/pi-messenger)
 - `interactive-shell` → [`nicobailon/pi-interactive-shell`](https://github.com/nicobailon/pi-interactive-shell)
