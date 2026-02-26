@@ -363,6 +363,14 @@ console.log("\n-- collectExternalModulePackages: enabled modules --");
 		],
 		"collects default external package sources",
 	);
+	const visual = entries.find(
+		(entry) => entry.source === "git:github.com/nicobailon/visual-explainer",
+	);
+	assertEq(
+		visual?.skills,
+		["SKILL.md"],
+		"visual-explainer applies SKILL.md filter",
+	);
 }
 
 console.log("\n-- collectExternalModulePackages: disabled modules omitted --");

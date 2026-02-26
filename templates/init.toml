@@ -24,7 +24,7 @@ memory = true                         # Memory browser and viewer
 vault = true                          # Knowledge vault with full-text search and orphan cleanup
 
 [modules.tools]
-brave-search = true                   # Web search via Brave Search API
+brave-search = true                   # Web search via Brave Search API (/brave-search command, brave_search tool)
 x-search = true                       # X/Twitter search via xAI Grok
 telegram = true                       # Telegram channel adapter for chatting with your agent
 email = false                         # Agent email via Rho Cloud (rhobot.dev)

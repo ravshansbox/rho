@@ -56,6 +56,15 @@ assert_contains() {
   fi
 }
 
+assert_not_contains() {
+  local haystack="$1" needle="$2" label="$3"
+  if echo "$haystack" | grep -qF "$needle"; then
+    fail "$label (found unexpected \"$needle\")"
+  else
+    pass "$label"
+  fi
+}
+
 assert_not_empty() {
   local content="$1" label="$2"
   if [ -n "$content" ]; then
@@ -167,6 +176,12 @@ assert_file_exists "$PI_DIR/settings.json" "pi settings.json created"
 settings_content=$(cat "$PI_DIR/settings.json")
 assert_contains "$settings_content" "rho" "settings.json references rho"
 
+# Runtime validation: clean startup should not report extension/skill conflicts
+pi_help_output=$(pi --help 2>&1) || true
+assert_not_contains "$pi_help_output" "conflicts with" "pi startup: no extension command/tool conflicts"
+assert_not_contains "$pi_help_output" "Skill conflicts" "pi startup: no skill conflict banner"
+assert_not_contains "$pi_help_output" "description is required" "pi startup: no invalid skill frontmatter warnings"
+
 # ── 6. Doctor ──────────────────────────────────────────
 
 echo ""
@@ -269,7 +284,7 @@ echo ""
 echo "-- Module Toggle --"
 
 # Disable brave-search, sync, verify it's excluded
-sed -i 's/^brave-search = true/brave-search = false/' "$RHO_DIR/init.toml"
+sed -i -E 's/^brave-search = (true|false)/brave-search = false/' "$RHO_DIR/init.toml"
 rho sync >/dev/null 2>&1 || true
 
 settings_after=$(cat "$PI_DIR/settings.json")
@@ -277,8 +292,8 @@ settings_after=$(cat "$PI_DIR/settings.json")
 # or not in the include list. Check that sync didn't crash.
 pass "sync succeeds with disabled module"
 
-# Re-enable
-sed -i 's/^brave-search = false/brave-search = true/' "$RHO_DIR/init.toml"
+# Re-enable brave-search
+sed -i -E 's/^brave-search = (true|false)/brave-search = true/' "$RHO_DIR/init.toml"
 rho sync >/dev/null 2>&1 || true
 pass "sync succeeds after re-enabling module"
 

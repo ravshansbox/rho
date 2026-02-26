@@ -33,7 +33,7 @@ memory = true         # Memory browser and viewer
 vault = true          # Knowledge vault with FTS and orphan cleanup
 
 [modules.tools]
-brave-search = true      # Web search via Brave API
+brave-search = true      # Brave Search extension (/brave-search command, brave_search tool)
 x-search = true          # X/Twitter search via xAI Grok
 telegram = true          # Telegram transport adapter
 email = false            # Agent email at name@rhobot.dev
@@ -56,7 +56,7 @@ usage-bars = true     # Token/cost usage display
 
 **Core modules are always on.** Setting `heartbeat = false` or `memory = false` has no effect — they're forced enabled. You'll get a warning from `rho sync` if you try.
 
-Some modules are backed by external packages (`subagents`, `messenger`, `interactive-shell`, `web-access`, `mcp-adapter`, `interview-tool`, `visual-explainer`). When enabled, `rho sync` installs their package sources automatically; when disabled, `rho sync` removes them.
+Some modules are backed by external packages (`subagents`, `messenger`, `interactive-shell`, `web-access`, `mcp-adapter`, `interview-tool`, `visual-explainer`). When enabled, `rho sync` installs their package sources automatically; when disabled, `rho sync` removes them. For `visual-explainer`, sync applies a `skills = ["SKILL.md"]` filter so non-skill markdown files (like README/CHANGELOG) are not treated as skills.
 
 Attribution for those default third-party modules:
 Special thanks to **Nico Bailon (@nicobailon)** for building and maintaining these packages.
