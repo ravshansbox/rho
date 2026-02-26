@@ -5,7 +5,7 @@
  * generates sync locks. All functions are pure and testable.
  */
 
-import type { PackagesConfig, RhoConfig } from "./config.ts";
+import type { PackageEntry, PackagesConfig, RhoConfig } from "./config.ts";
 import { REGISTRY } from "./registry.ts";
 
 // ---- Types ----
@@ -79,7 +79,14 @@ export function collectExternalModulePackages(
 		const enabled = catModules[name] === true;
 
 		if (enabled) {
-			entries.push({ source });
+			const entry: PackageEntry = { source };
+			if (Array.isArray(reg.packageExtensions)) {
+				entry.extensions = [...reg.packageExtensions];
+			}
+			if (Array.isArray(reg.packageSkills)) {
+				entry.skills = [...reg.packageSkills];
+			}
+			entries.push(entry);
 		}
 	}
 

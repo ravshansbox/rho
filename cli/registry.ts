@@ -13,6 +13,8 @@ export interface ModuleEntry {
 	alwaysOn?: boolean; // core modules that cannot be disabled
 	npmPackage?: string; // external npm package name (legacy shorthand)
 	packageSource?: string; // external package source (e.g., npm:foo, git:github.com/user/repo)
+	packageExtensions?: string[]; // optional extension filter for external package modules
+	packageSkills?: string[]; // optional skill filter for external package modules
 }
 
 /**
@@ -130,6 +132,7 @@ export const REGISTRY: Record<string, ModuleEntry> = {
 		extensions: [],
 		skills: [],
 		packageSource: "git:github.com/nicobailon/visual-explainer",
+		packageSkills: ["SKILL.md"],
 		description:
 			"Generate polished HTML diagrams, reviews, and comparison tables",
 	},

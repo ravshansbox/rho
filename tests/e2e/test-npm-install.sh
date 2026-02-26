@@ -33,6 +33,11 @@ check_contains() {
   echo "$haystack" | grep -qF "$needle" && pass "$label" || fail "$label (\"$needle\" not in output)"
 }
 
+check_not_contains() {
+  local haystack="$1" needle="$2" label="$3"
+  echo "$haystack" | grep -qF "$needle" && fail "$label (found unexpected \"$needle\")" || pass "$label"
+}
+
 check_not_empty() {
   [ -n "$1" ] && pass "$2" || fail "$2 (empty)"
 }
@@ -235,6 +240,12 @@ check_file "$PI_DIR/settings.json"    "settings.json created"
 settings_content=$(cat "$PI_DIR/settings.json")
 check_contains "$settings_content" "@rhobot-dev/rho" "settings.json: has @rhobot-dev/rho package"
 
+# Runtime validation: clean startup should not report extension/skill conflicts
+pi_help_output=$(pi --help 2>&1) || true
+check_not_contains "$pi_help_output" "conflicts with" "pi startup: no extension command/tool conflicts"
+check_not_contains "$pi_help_output" "Skill conflicts" "pi startup: no skill conflict banner"
+check_not_contains "$pi_help_output" "description is required" "pi startup: no invalid skill frontmatter warnings"
+
 # ── 7. Doctor ──────────────────────────────────────────
 
 echo ""
@@ -344,12 +355,12 @@ echo ""
 echo "── 11. Module toggle ──"
 
 # Disable brave-search, re-sync
-sed -i 's/^brave-search = true/brave-search = false/' "$RHO_DIR/init.toml"
+sed -i -E 's/^brave-search = (true|false)/brave-search = false/' "$RHO_DIR/init.toml"
 rho sync >/dev/null 2>&1 || true
 pass "sync: brave-search disabled"
 
-# Re-enable
-sed -i 's/^brave-search = false/brave-search = true/' "$RHO_DIR/init.toml"
+# Re-enable brave-search
+sed -i -E 's/^brave-search = (true|false)/brave-search = true/' "$RHO_DIR/init.toml"
 rho sync >/dev/null 2>&1 || true
 pass "sync: brave-search re-enabled"
 
